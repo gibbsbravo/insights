@@ -9,8 +9,6 @@ import seaborn as sns
 
 import os
 
-import config
-
 #%% Bucketize continuous variables
 
 def equal_bin(input_feature, n_bins):
@@ -189,7 +187,6 @@ def standardize(X_train_input, X_test_input):
     X_train_input.loc[:,std_cols] = sc.transform(std_train_df)
     X_test_input.loc[:,std_cols] = sc.transform(std_test_df)
 
-    return X_train_input, X_test_input
 
 def get_train_test_splits(input_df, target_name='target', test_size=0.30):
     X_features = input_df.loc[:, input_df.columns != target_name]
@@ -197,6 +194,11 @@ def get_train_test_splits(input_df, target_name='target', test_size=0.30):
     X_train, X_test, y_train, y_test = train_test_split(
             X_features, y, test_size=test_size, random_state=34)
     return X_train, X_test, y_train, y_test 
+
+
+def export_df_to_csv(X_input, y_input, file_name):
+    X_input['target'] = y_input
+    X_input.to_csv(file_name, index=False)
 
 # Implement SMOTE
 
@@ -272,12 +274,17 @@ cat_encoding_dict = {'Embarked':'mean-encode'}
 X_train, X_test = encode_cat_vars(
         X_train, X_test, cat_encoding_dict=cat_encoding_dict)
 
+X_train_std, X_test_std = X_train.copy(), X_test.copy()
+
 # Standardize features
-X_train_std, X_test_std = standardize(X_train, X_test)
+standardize(X_train_std, X_test_std)
 
+#%%
+export_df_to_csv(X_train, y_train, 'data/train_data.csv')
+export_df_to_csv(X_test, y_test, 'data/test_data.csv')
 
-
-
+export_df_to_csv(X_train_std, y_train, 'data/std_train_data.csv')
+export_df_to_csv(X_test_std, y_test, 'data/std_test_data.csv')
 
 #%% ------------------------- Archive ----------------------------
 
