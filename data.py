@@ -1,24 +1,303 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import pickle
+import json
+from datetime import datetime
+import os
+
 from sklearn.preprocessing import StandardScaler
+
+
+import matplotlib.pyplot as plt
 from collections import Counter
 from sklearn.model_selection import train_test_split
 
 import seaborn as sns
 
-import os
 
-#%% Bucketize continuous variables
 
-def equal_bin(input_feature, n_bins):
-    sep = (input_feature.size/float(n_bins))*np.arange(1,n_bins+1)
-    idx = sep.searchsorted(np.arange(input_feature.size))
-    return idx[input_feature.argsort().argsort()]
 
-def bin_feats(input_df, features_to_bin, n_bins=10):
-    for feature in features_to_bin:
-        input_df[feature] = equal_bin(input_df[feature], n_bins)
+#%% Data Loading and Saving
+
+def create_folder(input_folder_path):
+    assert os.path.exists(input_folder_path) is False, "Folder already exists"
+
+    os.makedirs(input_folder_path)
+
+    return True
+
+def read_json_object(input_file_path):
+    """Only designed for loading json files"""
+    assert '.json' in input_file_path, 'Please ensure file is .json filetype'
+    with open(input_file_path) as json_file:
+        results_dict = json.load(json_file)
+    return results_dict
+
+def save_json_object(output_object, output_file_path, overwrite=False):
+    assert ".json" in output_file_path, "Please ensure format is saved as .json"
+
+    if (overwrite is False) & (os.path.exists(output_file_path)):
+        raise Exception("File '{}' exists. Please either set overwrite=True or rename the file.".format(
+            output_file_path))
+    else:
+        with open(output_file_path, 'w') as json_out:
+            json.dump(output_object, json_out)
+        print("File saved successfuly at {}".format(output_file_path))
+
+    return True
+
+def read_txt_file(input_file_path):
+    """Only designed for loading txt files"""
+    assert ".txt" in input_file_path, "Please ensure file format is .txt"
+
+    with open(input_file_path, encoding='utf8') as f:
+        content = f.read()
+
+    return content
+
+def save_txt_file(output_object, output_file_path, overwrite=False):
+    assert ".txt" in output_file_path, "Please ensure format is saved as .txt"
+
+    if (overwrite is False) & (os.path.exists(output_file_path)):
+        raise Exception("File '{}' exists. Please either set overwrite=True or rename the file.".format(
+            output_file_path))
+    else:
+        with open(output_file_path, 'w', encoding='utf8') as f:
+            f.write(output_object)
+        print("File saved successfuly at {}".format(output_file_path))
+
+    return True
+
+def read_pickle_object(file_name):
+    """Only designed for loading pickle files"""
+    assert '.pickle' in file_name, 'Please ensure file is .pickle filetype'
+    with open(file_name, 'rb') as handle:
+        pickle_object = pickle.load(handle)
+    return pickle_object
+
+def save_pickle_object(output_object, output_file_path, overwrite=False):
+    assert ".pickle" in output_file_path, "Please ensure format is saved as .pickle"
+
+    if (overwrite is False) & (os.path.exists(output_file_path)):
+        raise Exception("File '{}' exists. Please either set overwrite=True or rename the file.".format(
+            output_file_path))
+    else:
+        with open(output_file_path, "wb") as pickle_out:
+            pickle.dump(output_object, pickle_out)
+        print("File saved successfuly at {}".format(output_file_path))
+
+    return True
+
+
+
+
+#%% Train Validation Test Split / Cross Validation
+
+input_df = pd.read_csv('data/train.csv')
+target_name = 'SalePrice'
+split_ratios = {'train' : 0.60,
+                'validation' : 0.20,
+                'test' : 0.20}
+
+class ModelData():
+    def __init__(self, input_df, target_name, split_ratios):
+        """
+        input_df: full dataframe
+        target_name: column name of target variable for prediction
+        split ratios: expects a dictionary of the splits as follows:
+            {'train' : 0.60,
+             'validation' : 0.20,
+             'test' : 0.20}
+        """
+        len_input_df = len(input_df)
+        random_idx = np.random.choice(
+            list(range(len_input_df)), 
+            len_input_df,
+            replace=False)
+        
+        train_idx = int(split_ratios['train'] * len_input_df)
+        
+        if ('validation' in split_ratios) and (split_ratios['validation'] > 0):
+            val_idx = int(split_ratios['train'] * len_input_df) + int(split_ratios['validation'] * len_input_df)
+            
+            train_set = random_idx[:train_idx]
+            val_set = random_idx[train_idx:val_idx]
+            test_set = random_idx[val_idx:]
+                
+        else:
+            train_set = random_idx[:train_idx]
+            test_set = random_idx[train_idx:]
+        
+        self.input_df = input_df
+        self.target_name = target_name
+        self.split_ratios = split_ratios
+        
+        self.X_train = input_df.loc[train_set, input_df.columns != target_name].reset_index(drop=True)
+        self.y_train = input_df.loc[train_set, target_name].reset_index(drop=True)
+        self.X_test = input_df.loc[test_set, input_df.columns != target_name].reset_index(drop=True)
+        self.y_test = input_df.loc[test_set, target_name].reset_index(drop=True)
+        
+        if ('validation' in split_ratios) and (split_ratios['validation'] > 0):
+            self.X_val = input_df.loc[val_set, input_df.columns != target_name].reset_index(drop=True)
+            self.y_val = input_df.loc[val_set, target_name].reset_index(drop=True)
+        else:
+            self.X_val = None
+            self.y_val = None
+
+
+
+
+
+
+#%% Feature Engineering
+
+# Requires state for test transform
+# def standardize(X_train_input, X_test_input):
+#     X_train_input = X_train_input.select_dtypes(exclude=['object'])
+#     std_cols = X_train_input.columns[~((X_train_input==0) | (X_train_input==1)).all()]
+
+#     #Standardize features which require it in 'std_cols'
+#     sc = StandardScaler()
+
+#     std_train_df = X_train_input.loc[:,std_cols].copy()
+#     std_test_df = X_test_input.loc[:,std_cols].copy()
+
+#     sc.fit(std_train_df)
+
+#     results = {'std_columns' : std_cols,
+#                'std_scalar_model' : sc,
+#                'X_train_std' : pd.DataFrame(sc.transform(std_train_df), columns=std_cols),
+#                'X_test_std' : pd.DataFrame(sc.transform(std_test_df), columns=std_cols)}
+    
+#     return results 
+
+# Handle categorical features
+def standardize_column(input_series):
+    series_mean = input_series.mean()
+    series_std_dev = input_series.std()
+    
+    standardized_series = (input_series - series_mean) / series_std_dev
+    
+    return {'transformed_series' : standardized_series,
+            'model': {'series_mean' : series_mean, 'series_std_dev' : series_std_dev}}
+
+# Bucketize continuous variables
+def bin_column(input_series, n_bins=5):
+    """bins column into n equally spaced bins (do NOT have equal number of rows)"""
+    sep = (input_series.size/float(n_bins)) * np.arange(1, n_bins+1)
+    idx = sep.searchsorted(np.arange(input_series.size))
+    
+    return idx[input_series.argsort().argsort()]
+
+def mean_encode_column(input_series, target_output):
+    assert len(input_series) == len(target_output), "Array lengths are not equal"
+    merged_df = pd.merge(input_series, target_output, how='left', left_index=True, right_index=True)
+    mean_target_value = merged_df.groupby(input_series.name).mean()
+    mean_target_dict = mean_target_value[target_output.name].to_dict()
+    
+    return {'transformed_series' : input_series.map(mean_target_dict),
+            'model' : mean_target_dict }
+
+
+# Does not require state for test transform
+def one_hot_encode_column(input_series):
+    one_hot_df = pd.get_dummies(input_series)
+    one_hot_df.columns = [input_series.name+': '+x for x in one_hot_df.columns]
+    
+    return one_hot_df
+    
+def log_transform_column(input_series):
+    assert input_series.dtype != 'O'
+    
+    return np.log(input_series)
+
+# Other feature engineering
+def convert_utc_to_dt(input_utc):
+    """Converts UTC to datetime and then provides a formatted date time"""
+    dt = datetime.fromtimestamp(input_utc)
+
+    return {'converted_date' : dt, 'converted_date_string' : dt.strftime("%d-%b-%Y - %I:%M %p")}
+
+
+
+# def bin_feats(input_df, features_to_bin, n_bins=10):
+#     for feature in features_to_bin:
+#         input_df[feature] = equal_bin(input_df[feature], n_bins)
+
+
+# def encode_cat_vars(X_train_input, X_test_input, cat_encoding_dict):
+#     for feature, encoding in cat_encoding_dict.items():
+#         if encoding == 'one-hot':
+#             X_train_output, X_test_output = one_hot_encode(X_train_input[feature], X_test_input[feature])
+#             X_train_input = X_train_input.join(X_train_output)
+#             X_test_input = X_test_input.join(X_test_output)
+
+#             X_train_input.drop(feature,axis=1,inplace=True)
+#             X_test_input.drop(feature,axis=1,inplace=True)
+
+#         elif encoding == 'mean-encode':
+#             X_train_input[feature], X_test_input[feature] = mean_encode(X_train_input[feature], X_test_input[feature])
+            
+#         # Ensure all columns are shared between train / test, if not then add zero column to test set
+#         for col in X_train_input.columns:
+#             if col not in X_test_input.columns:
+#                 X_test_input[col] = [0] * len(X_test_input)  
+#     return X_train_input, X_test_input
+
+
+#%%
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+#make this example reproducible
+np.random.seed(0)
+
+#create beta distributed random variable with 200 values
+data = DF.X_train.LotFrontage
+
+#create log-transformed data
+data_log = log_transform_column(data)
+
+#define grid of plots
+fig, axs = plt.subplots(nrows=1, ncols=2)
+
+#create histograms
+axs[0].hist(data, edgecolor='black')
+axs[1].hist(data_log, edgecolor='black')
+
+#add title to each histogram
+axs[0].set_title('Original Data')
+axs[1].set_title('Log-Transformed Data')
+
+
+
+
+
+
+#%%
+
+DF = ModelData(input_df, target_name, split_ratios)
+a = standardize(MD.X_train, MD.X_val)
+
+mean_encode_column(input_series, target_output)
+
+input_series = MD.X_train.MSZoning
+
+target_output = MD.y_train
+
+input_series = DF.X_train.Id
+
+#%%
+
+
+
+
+
+
+
+
+
 
 #%% Visualize categorical features
 
