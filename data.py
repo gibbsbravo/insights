@@ -175,7 +175,7 @@ class SimpleImputer():
             self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : input_series.median()}
             
         elif strategy == 'mode':
-            self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : input_series.mode().item()}
+            self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : input_series.mode().values[0]}
         
         elif strategy == 'unknown':
             self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : 'unknown'}
@@ -193,11 +193,56 @@ class SimpleImputer():
         return input_series.fillna(constant_value)
         
 
+#%% Handle imbalanced datasets
+
+np.sum(np.where(DF.y_train > 350000, 1 , 0)) / len(DF.y_train)
+
+DF.y_train = np.where(DF.y_train > 350000, 1 , 0)
+
+np.sum(DF.y_train) / len(DF.y_train)
+
+# Undersampling
+from imblearn.under_sampling import RandomUnderSampler
+
+desired_ratio = 0.25
+n_positive = np.sum(DF.y_train)
+n_total =  int(n_positive / desired_ratio)
+n_negative = n_total - n_positive
+
+rus = RandomUnderSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+X_res, y_res = rus.fit_resample(DF.X_train, DF.y_train)
+
+# Oversampling
+from imblearn.over_sampling import RandomOverSampler
+
+desired_ratio = 0.25
+n_negative = np.sum(DF.y_train == 0)
+n_positive = int((n_negative / (1 - desired_ratio)) - n_negative)
+
+rus = RandomOverSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+X_res, y_res = rus.fit_resample(DF.X_train, DF.y_train)
+
+# SMOTE -- Need to remove null values and convert categorial variables before using
+from imblearn.over_sampling import SMOTE
+assert len(DF.X_train.select_dtypes('object')) == 0, "Need to remove categorical features before using SMOTE"
+assert np.sum(np.sum(DF.X_train.isnull())) ==0, "Need to remove null values before using SMOTE"
+
+desired_ratio = 0.25
+n_negative = np.sum(DF.y_train == 0)
+n_positive = int((n_negative / (1 - desired_ratio)) - n_negative)
+sm = SMOTE(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+X_res, y_res = sm.fit_resample(DF.X_train, DF.y_train)
+
+
 #%%
 
 
+si = SimpleImputer()
 
+[si.fit(DF.X_train[col], 'mode') for col in DF.X_train.columns]
 
+for col in DF.X_train.columns:
+    DF.X_train.loc[:, col] = si.transform(DF.X_train[col])
 
 
 #%%
