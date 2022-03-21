@@ -12,6 +12,11 @@ from sklearn.model_selection import train_test_split
 import seaborn as sns
 
 
+#%% TODO: 
+# - Can potentially group the loading and saving functions into one with a switch on filetype
+# - Can add enhanced imputation strategies (KNN, Decision Tree, etc.)
+# 
+
 
 
 #%% Data Loading and Saving
@@ -135,10 +140,79 @@ class ModelData():
             self.X_val = None
             self.y_val = None
             
-            
+#%% Handle Duplicate Values
+
+def get_duplicate_rows(input_df, column_subset=['Id']):
+    """Returns a dataframe containing the duplicated rows"""
+    return input_df.loc[input_df.duplicated(subset=column_subset, keep='first')]
+
+# Get duplicate rows then remove them from dataframe
+# duplicate_rows = get_duplicate_rows(input_df, column_subset)
+# df = df.drop(duplicate_rows.index).reset_index(drop=True)
+
 #%% Handle Null Values
 
+def prop_column_null(input_df):
+    """Returns the proportion of null values by column"""
+    return (input_df.isnull().sum(axis = 0) / len(input_df)).sort_values(ascending=False)
 
+def prop_row_null(input_df):
+    """Returns the proportion of null values by row"""
+    return (input_df.isnull().sum(axis = 1) / len(input_df.columns)).sort_values(ascending=False)
+
+class SimpleImputer():
+    def __init__(self):
+        self.model_parameters = {}
+    
+    def fit(self, input_series, strategy='mean'):
+        valid_strategies = ['mean', 'median', 'mode', 'unknown']
+        assert strategy in valid_strategies
+
+        if strategy == 'mean':
+            self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : input_series.mean()}
+            
+        elif strategy == 'median':
+            self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : input_series.median()}
+            
+        elif strategy == 'mode':
+            self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : input_series.mode().item()}
+        
+        elif strategy == 'unknown':
+            self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : 'unknown'}
+        
+        else:
+            print("Please select one of: {} as imputation strategy".format(valid_strategies))
+    
+        return self.model_parameters[input_series.name]
+    
+    def transform(self, input_series):
+        return input_series.fillna(self.model_parameters[input_series.name]['value'])
+
+    def apply_constant_value(self, input_series, constant_value):
+        self.model_parameters[input_series.name] = {'strategy' : 'constant value', 'value' : constant_value}
+        return input_series.fillna(constant_value)
+        
+
+#%%
+
+
+
+
+
+
+#%%
+df = DF.X_train
+prop_column_null(df)[:20]
+
+input_series = DF.X_train.LotFrontage
+
+input_series.mean()
+
+si = SimpleImputer()
+
+si.fit(DF.X_train.LotFrontage, 'mode')
+
+si.transform(DF.X_train.LotFrontage)
 
 #%% Feature Engineering
 
@@ -162,6 +236,7 @@ class MeanEncoder():
         merged_df = pd.merge(input_series, target_output, how='left', left_index=True, right_index=True)
         mean_target_value = merged_df.groupby(input_series.name).mean()
         self.model_parameters[input_series.name] = mean_target_value[target_output.name].to_dict()
+        return self.model_parameters[input_series.name]
         
     def transform(self, input_series):
         return input_series.map(self.model_parameters[input_series.name])
@@ -172,6 +247,7 @@ class BinEncoder():
         
     def fit(self, input_series, n_bins=5):
         self.model_parameters[input_series.name] = (input_series.size/float(n_bins)) * np.arange(1, n_bins+1)
+        return self.model_parameters[input_series.name]
     
     def transform(self, input_series):
         idx = self.model_parameters[input_series.name].searchsorted(np.arange(input_series.size))
