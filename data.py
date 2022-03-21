@@ -4,6 +4,9 @@ import pickle
 import json
 from datetime import datetime
 import os
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import RandomOverSampler, SMOTE
+import chardet
 
 import matplotlib.pyplot as plt
 from collections import Counter
@@ -15,8 +18,6 @@ import seaborn as sns
 #%% TODO: 
 # - Can potentially group the loading and saving functions into one with a switch on filetype
 # - Can add enhanced imputation strategies (KNN, Decision Tree, etc.)
-# 
-
 
 
 #%% Data Loading and Saving
@@ -27,6 +28,43 @@ def create_folder(input_folder_path):
     os.makedirs(input_folder_path)
 
     return True
+
+def load_file(input_file_path):
+    accepted_file_types = ['.txt', '.json', '.pickle']
+    _, file_extension = os.path.splitext(input_file_path)
+    assert file_extension in accepted_file_types, "Cannot load this file type"
+    
+    if file_extension == '.txt':
+        with open(input_file_path, encoding='utf8') as file:
+            content = file.read()
+        return content
+    
+    elif file_extension == '.json':
+        with open(input_file_path) as file:
+            content = json.load(file)
+        return content
+
+    elif file_extension == '.pickle':        
+        with open(input_file_path, 'rb') as file:
+            content = pickle.load(file)
+        return content
+    
+    elif file_extension == '.csv':
+        try:
+            content = pd.read_csv(input_file_path)
+            return content
+            
+        except Exception as e:
+            print(e)
+            with open(file, 'rb') as rawdata:
+                result = chardet.detect(rawdata.read(10000))
+            
+                # Note: low memory option will enable columns with mixed data types to be asserted later
+                content = pd.read_csv(file, encoding=result['encoding'], low_memory=False)
+                return content
+
+    else:
+        print("Please select one of: {} file types".format(accepted_file_types))
 
 def read_json_object(input_file_path):
     """Only designed for loading json files"""
@@ -79,6 +117,19 @@ def read_pickle_object(file_name):
 
 def save_pickle_object(output_object, output_file_path, overwrite=False):
     assert ".pickle" in output_file_path, "Please ensure format is saved as .pickle"
+
+    if (overwrite is False) & (os.path.exists(output_file_path)):
+        raise Exception("File '{}' exists. Please either set overwrite=True or rename the file.".format(
+            output_file_path))
+    else:
+        with open(output_file_path, "wb") as pickle_out:
+            pickle.dump(output_object, pickle_out)
+        print("File saved successfuly at {}".format(output_file_path))
+
+    return True
+
+def save_csv_object():
+    assert ".csv" in output_file_path, "Please ensure format is saved as .pickle"
 
     if (overwrite is False) & (os.path.exists(output_file_path)):
         raise Exception("File '{}' exists. Please either set overwrite=True or rename the file.".format(
@@ -195,69 +246,37 @@ class SimpleImputer():
 
 #%% Handle imbalanced datasets
 
-np.sum(np.where(DF.y_train > 350000, 1 , 0)) / len(DF.y_train)
+def balance_data(input_X_train, input_y_train, target_ratio, approach='SMOTE'):
+    assert approach in ['random_undersampling', 'random_oversampling', 'SMOTE']
+    
+    if approach == 'random_undersampling':
+        n_positive = np.sum(input_y_train)
+        n_total =  int(n_positive / target_ratio)
+        n_negative = n_total - n_positive
+        model = RandomUnderSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+    
+    elif approach == 'random_oversampling':
+        n_negative = np.sum(DF.y_train == 0)
+        n_positive = int((n_negative / (1 - target_ratio)) - n_negative)
+        model = RandomOverSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+        
+    elif approach == 'SMOTE':
+        # SMOTE -- Need to remove null values and convert categorial variables before using
+        assert len(input_X_train.select_dtypes('object').columns) == 0, "Need to remove categorical features before using SMOTE"
+        assert np.sum(np.sum(input_X_train.isnull())) == 0, "Need to remove null values before using SMOTE"
 
-DF.y_train = np.where(DF.y_train > 350000, 1 , 0)
+        n_negative = np.sum(input_y_train == 0)
+        n_positive = int((n_negative / (1 - target_ratio)) - n_negative)
+        model = SMOTE(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+    
+    X_resampled, y_resampled = model.fit_resample(input_X_train, input_y_train)
 
-np.sum(DF.y_train) / len(DF.y_train)
+    print("Resampling complete.")
+    print("{} records before | {} records after".format(len(input_X_train), len(X_resampled)))
+    print("{:.1%} positive | {:.1%} positive".format(
+        input_y_train.sum() / len(input_y_train), y_resampled.sum() / len(y_resampled)))
 
-# Undersampling
-from imblearn.under_sampling import RandomUnderSampler
-
-desired_ratio = 0.25
-n_positive = np.sum(DF.y_train)
-n_total =  int(n_positive / desired_ratio)
-n_negative = n_total - n_positive
-
-rus = RandomUnderSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
-X_res, y_res = rus.fit_resample(DF.X_train, DF.y_train)
-
-# Oversampling
-from imblearn.over_sampling import RandomOverSampler
-
-desired_ratio = 0.25
-n_negative = np.sum(DF.y_train == 0)
-n_positive = int((n_negative / (1 - desired_ratio)) - n_negative)
-
-rus = RandomOverSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
-X_res, y_res = rus.fit_resample(DF.X_train, DF.y_train)
-
-# SMOTE -- Need to remove null values and convert categorial variables before using
-from imblearn.over_sampling import SMOTE
-assert len(DF.X_train.select_dtypes('object')) == 0, "Need to remove categorical features before using SMOTE"
-assert np.sum(np.sum(DF.X_train.isnull())) ==0, "Need to remove null values before using SMOTE"
-
-desired_ratio = 0.25
-n_negative = np.sum(DF.y_train == 0)
-n_positive = int((n_negative / (1 - desired_ratio)) - n_negative)
-sm = SMOTE(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
-X_res, y_res = sm.fit_resample(DF.X_train, DF.y_train)
-
-
-#%%
-
-
-si = SimpleImputer()
-
-[si.fit(DF.X_train[col], 'mode') for col in DF.X_train.columns]
-
-for col in DF.X_train.columns:
-    DF.X_train.loc[:, col] = si.transform(DF.X_train[col])
-
-
-#%%
-df = DF.X_train
-prop_column_null(df)[:20]
-
-input_series = DF.X_train.LotFrontage
-
-input_series.mean()
-
-si = SimpleImputer()
-
-si.fit(DF.X_train.LotFrontage, 'mode')
-
-si.transform(DF.X_train.LotFrontage)
+    return X_resampled, y_resampled
 
 #%% Feature Engineering
 
@@ -318,8 +337,6 @@ def convert_utc_to_dt(input_utc):
 
 
 
-
-
 #%%
 
 input_df = pd.read_csv('data/train.csv')
@@ -353,7 +370,30 @@ bin.transform(DF.X_train.Id)
 #%%
 
 
+si = SimpleImputer()
 
+[si.fit(DF.X_train[col], 'mode') for col in DF.X_train.columns]
+
+for col in DF.X_train.columns:
+    DF.X_train.loc[:, col] = si.transform(DF.X_train[col])
+
+
+#%%
+df = DF.X_train
+prop_column_null(df)[:20]
+
+input_series = DF.X_train.LotFrontage
+
+input_series.mean()
+
+si = SimpleImputer()
+
+si.fit(DF.X_train.LotFrontage, 'mode')
+
+si.transform(DF.X_train.LotFrontage)
+
+
+balance_data(DF.X_train.select_dtypes(exclude=['object']), DF.y_train, 0.25, 'random_oversampling')
 
 
 
@@ -732,3 +772,29 @@ export_df_to_csv(X_test_std, y_test, 'data/std_test_data.csv')
 #     idx = sep.searchsorted(np.arange(input_series.size))
     
 #     return idx[input_series.argsort().argsort()]
+
+# desired_ratio = 0.25
+# n_positive = np.sum(DF.y_train)
+# n_total =  int(n_positive / desired_ratio)
+# n_negative = n_total - n_positive
+
+# rus = RandomUnderSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+# X_res, y_res = rus.fit_resample(DF.X_train, DF.y_train)
+
+# # Oversampling
+# desired_ratio = 0.25
+# n_negative = np.sum(DF.y_train == 0)
+# n_positive = int((n_negative / (1 - desired_ratio)) - n_negative)
+
+# rus = RandomOverSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+# X_res, y_res = rus.fit_resample(DF.X_train, DF.y_train)
+
+# # SMOTE -- Need to remove null values and convert categorial variables before using
+# assert len(DF.X_train.select_dtypes('object')) == 0, "Need to remove categorical features before using SMOTE"
+# assert np.sum(np.sum(DF.X_train.isnull())) ==0, "Need to remove null values before using SMOTE"
+
+# desired_ratio = 0.25
+# n_negative = np.sum(DF.y_train == 0)
+# n_positive = int((n_negative / (1 - desired_ratio)) - n_negative)
+# sm = SMOTE(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+# X_res, y_res = sm.fit_resample(DF.X_train, DF.y_train)
