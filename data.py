@@ -5,9 +5,6 @@ import json
 from datetime import datetime
 import os
 
-from sklearn.preprocessing import StandardScaler
-
-
 import matplotlib.pyplot as plt
 from collections import Counter
 from sklearn.model_selection import train_test_split
@@ -93,12 +90,6 @@ def save_pickle_object(output_object, output_file_path, overwrite=False):
 
 #%% Train Validation Test Split / Cross Validation
 
-input_df = pd.read_csv('data/train.csv')
-target_name = 'SalePrice'
-split_ratios = {'train' : 0.60,
-                'validation' : 0.20,
-                'test' : 0.20}
-
 class ModelData():
     def __init__(self, input_df, target_name, split_ratios):
         """
@@ -143,63 +134,49 @@ class ModelData():
         else:
             self.X_val = None
             self.y_val = None
-
-
-
+            
+            
+#%% Handle Null Values
 
 
 
 #%% Feature Engineering
 
-# Requires state for test transform
-# def standardize(X_train_input, X_test_input):
-#     X_train_input = X_train_input.select_dtypes(exclude=['object'])
-#     std_cols = X_train_input.columns[~((X_train_input==0) | (X_train_input==1)).all()]
+class StandardScaler():
+    def __init__(self):
+        self.model_parameters = {}
+        
+    def fit(self, input_series):
+        self.model_parameters[input_series.name] = {'mean': input_series.mean(), 'std_dev':input_series.std()}
+        return self.model_parameters[input_series.name]
+        
+    def transform(self, input_series):
+        return (input_series - self.model_parameters[input_series.name]['mean']) / self.model_parameters[input_series.name]['std_dev']
 
-#     #Standardize features which require it in 'std_cols'
-#     sc = StandardScaler()
 
-#     std_train_df = X_train_input.loc[:,std_cols].copy()
-#     std_test_df = X_test_input.loc[:,std_cols].copy()
-
-#     sc.fit(std_train_df)
-
-#     results = {'std_columns' : std_cols,
-#                'std_scalar_model' : sc,
-#                'X_train_std' : pd.DataFrame(sc.transform(std_train_df), columns=std_cols),
-#                'X_test_std' : pd.DataFrame(sc.transform(std_test_df), columns=std_cols)}
+class MeanEncoder():
+    def __init__(self):
+        self.model_parameters = {}
     
-#     return results 
+    def fit(self, input_series, target_output):
+        merged_df = pd.merge(input_series, target_output, how='left', left_index=True, right_index=True)
+        mean_target_value = merged_df.groupby(input_series.name).mean()
+        self.model_parameters[input_series.name] = mean_target_value[target_output.name].to_dict()
+        
+    def transform(self, input_series):
+        return input_series.map(self.model_parameters[input_series.name])
 
-# Handle categorical features
-def standardize_column(input_series):
-    series_mean = input_series.mean()
-    series_std_dev = input_series.std()
+class BinEncoder():
+    def __init__(self):
+        self.model_parameters = {}
+        
+    def fit(self, input_series, n_bins=5):
+        self.model_parameters[input_series.name] = (input_series.size/float(n_bins)) * np.arange(1, n_bins+1)
     
-    standardized_series = (input_series - series_mean) / series_std_dev
-    
-    return {'transformed_series' : standardized_series,
-            'model': {'series_mean' : series_mean, 'series_std_dev' : series_std_dev}}
+    def transform(self, input_series):
+        idx = self.model_parameters[input_series.name].searchsorted(np.arange(input_series.size))
+        return idx[input_series.argsort().argsort()]
 
-# Bucketize continuous variables
-def bin_column(input_series, n_bins=5):
-    """bins column into n equally spaced bins (do NOT have equal number of rows)"""
-    sep = (input_series.size/float(n_bins)) * np.arange(1, n_bins+1)
-    idx = sep.searchsorted(np.arange(input_series.size))
-    
-    return idx[input_series.argsort().argsort()]
-
-def mean_encode_column(input_series, target_output):
-    assert len(input_series) == len(target_output), "Array lengths are not equal"
-    merged_df = pd.merge(input_series, target_output, how='left', left_index=True, right_index=True)
-    mean_target_value = merged_df.groupby(input_series.name).mean()
-    mean_target_dict = mean_target_value[target_output.name].to_dict()
-    
-    return {'transformed_series' : input_series.map(mean_target_dict),
-            'model' : mean_target_dict }
-
-
-# Does not require state for test transform
 def one_hot_encode_column(input_series):
     one_hot_df = pd.get_dummies(input_series)
     one_hot_df.columns = [input_series.name+': '+x for x in one_hot_df.columns]
@@ -217,6 +194,50 @@ def convert_utc_to_dt(input_utc):
     dt = datetime.fromtimestamp(input_utc)
 
     return {'converted_date' : dt, 'converted_date_string' : dt.strftime("%d-%b-%Y - %I:%M %p")}
+
+
+
+
+
+#%%
+
+input_df = pd.read_csv('data/train.csv')
+target_name = 'SalePrice'
+split_ratios = {'train' : 0.60,
+                'validation' : 0.20,
+                'test' : 0.20}
+
+DF = ModelData(input_df, target_name, split_ratios)
+
+
+sc = StandardScaler()
+me = MeanEncoder()
+bin = BinEncoder()
+
+#%%
+
+me.fit(DF.X_train.MSZoning, DF.y_train)
+me.fit(DF.X_train.SaleType, DF.y_train)
+
+me.model_parameters
+
+a = mean_encode_column(DF.X_train.MSZoning, DF.y_train)
+
+b = me.transform(DF.X_train.MSZoning)
+
+bin.fit(DF.X_train.Id)
+
+bin.transform(DF.X_train.Id)
+
+#%%
+
+
+
+
+
+
+
+# Does not require state for test transform
 
 
 
@@ -269,29 +290,6 @@ axs[1].hist(data_log, edgecolor='black')
 #add title to each histogram
 axs[0].set_title('Original Data')
 axs[1].set_title('Log-Transformed Data')
-
-
-
-
-
-
-#%%
-
-DF = ModelData(input_df, target_name, split_ratios)
-a = standardize(MD.X_train, MD.X_val)
-
-mean_encode_column(input_series, target_output)
-
-input_series = MD.X_train.MSZoning
-
-target_output = MD.y_train
-
-input_series = DF.X_train.Id
-
-#%%
-
-
-
 
 
 
@@ -567,11 +565,49 @@ export_df_to_csv(X_test_std, y_test, 'data/std_test_data.csv')
 
 #%% ------------------------- Archive ----------------------------
 
-# Rename columns for wine 
-#df.columns = ['target', "alcohol", "malic_acid", "ash" , "ash_alcalinity", "magnesium", "total_phenols",
-# "flavanoids", "nonflavanoid_phenols", "proanthocyanins", "color_intensity", "hue",
-# "OD280/OD315_diluted_wines", "proline"]
+# Requires state for test transform
+# def standardize(X_train_input, X_test_input):
+#     X_train_input = X_train_input.select_dtypes(exclude=['object'])
+#     std_cols = X_train_input.columns[~((X_train_input==0) | (X_train_input==1)).all()]
 
-## Add null values to test
-#df.proline.iloc[5:20] = np.nan
-#df.hue.iloc[25:50] = np.nan
+#     #Standardize features which require it in 'std_cols'
+#     sc = StandardScaler()
+
+#     std_train_df = X_train_input.loc[:,std_cols].copy()
+#     std_test_df = X_test_input.loc[:,std_cols].copy()
+
+#     sc.fit(std_train_df)
+
+#     results = {'std_columns' : std_cols,
+#                'std_scalar_model' : sc,
+#                'X_train_std' : pd.DataFrame(sc.transform(std_train_df), columns=std_cols),
+#                'X_test_std' : pd.DataFrame(sc.transform(std_test_df), columns=std_cols)}
+    
+#     return results 
+
+# Handle categorical features
+# def standardize_column(input_series):
+#     series_mean = input_series.mean()
+#     series_std_dev = input_series.std()
+    
+#     standardized_series = (input_series - series_mean) / series_std_dev
+    
+#     return {'transformed_series' : standardized_series,
+#             'model': {'series_mean' : series_mean, 'series_std_dev' : series_std_dev}}
+
+# def mean_encode_column(input_series, target_output):
+#     assert len(input_series) == len(target_output), "Array lengths are not equal"
+#     merged_df = pd.merge(input_series, target_output, how='left', left_index=True, right_index=True)
+#     mean_target_value = merged_df.groupby(input_series.name).mean()
+#     mean_target_dict = mean_target_value[target_output.name].to_dict()
+    
+#     return {'transformed_series' : input_series.map(mean_target_dict),
+#             'model' : mean_target_dict }
+
+# # Bucketize continuous variables
+# def bin_column(input_series, n_bins=5):
+#     """bins column into n equally spaced bins (do NOT have equal number of rows)"""
+#     sep = (input_series.size/float(n_bins)) * np.arange(1, n_bins+1)
+#     idx = sep.searchsorted(np.arange(input_series.size))
+    
+#     return idx[input_series.argsort().argsort()]
