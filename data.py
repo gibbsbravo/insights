@@ -8,13 +8,6 @@ from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 import chardet
 
-import matplotlib.pyplot as plt
-from collections import Counter
-from sklearn.model_selection import train_test_split
-
-import seaborn as sns
-
-
 #%% Data Loading and Saving
 
 def create_folder(input_folder_path):
@@ -92,6 +85,9 @@ def save_file(output_object, output_file_path, overwrite=False):
         
         print("File saved successfuly at {}".format(output_file_path))
 
+def sample_data(input_df, fraction=0.40):
+    return pd.sample(frac=fraction, replace=False, random_state=34)
+
 #%% Train Validation Test Split / Cross Validation
 
 class ModelData():
@@ -151,14 +147,6 @@ def get_duplicate_rows(input_df, column_subset=['Id']):
 
 #%% Handle Null Values
 
-def prop_column_null(input_df):
-    """Returns the proportion of null values by column"""
-    return (input_df.isnull().sum(axis = 0) / len(input_df)).sort_values(ascending=False)
-
-def prop_row_null(input_df):
-    """Returns the proportion of null values by row"""
-    return (input_df.isnull().sum(axis = 1) / len(input_df.columns)).sort_values(ascending=False)
-
 class SimpleImputer():
     def __init__(self):
         self.model_parameters = {}
@@ -190,7 +178,27 @@ class SimpleImputer():
     def apply_constant_value(self, input_series, constant_value):
         self.model_parameters[input_series.name] = {'strategy' : 'constant value', 'value' : constant_value}
         return input_series.fillna(constant_value)
+    
+    def fit_df(self, input_df, strategy='mean'):
+        for col in input_df:
+            self.fit(input_df[col], strategy)
         
+        return self.model_parameters
+    
+    def transform_df(self, input_df):
+        output_df = input_df.copy()
+        for col in output_df:
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
+    
+    def fit_transform_df(self, input_df, strategy='mean'):
+        output_df = input_df.copy()
+        for col in output_df:
+            self.fit(output_df[col], strategy)
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
 
 #%% Handle imbalanced datasets
 
@@ -204,7 +212,7 @@ def balance_data(input_X_train, input_y_train, target_ratio, approach='SMOTE'):
         model = RandomUnderSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
     
     elif approach == 'random_oversampling':
-        n_negative = np.sum(DF.y_train == 0)
+        n_negative = np.sum(input_y_train == 0)
         n_positive = int((n_negative / (1 - target_ratio)) - n_negative)
         model = RandomOverSampler(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
         
@@ -238,6 +246,27 @@ class StandardScaler():
         
     def transform(self, input_series):
         return (input_series - self.model_parameters[input_series.name]['mean']) / self.model_parameters[input_series.name]['std_dev']
+    
+    def fit_df(self, input_df):
+        for col in input_df:
+            self.fit(input_df[col])
+        
+        return self.model_parameters
+    
+    def transform_df(self, input_df):
+        output_df = input_df.copy()
+        for col in output_df:
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
+    
+    def fit_transform_df(self, input_df):
+        output_df = input_df.copy()
+        for col in output_df:
+            self.fit(output_df[col])
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
 
 
 class MeanEncoder():
@@ -252,6 +281,27 @@ class MeanEncoder():
         
     def transform(self, input_series):
         return input_series.map(self.model_parameters[input_series.name])
+    
+    def fit_df(self, input_df, target_output):
+        for col in input_df:
+            self.fit(input_df[col], target_output)
+        
+        return self.model_parameters
+    
+    def transform_df(self, input_df):
+        output_df = input_df.copy()
+        for col in output_df:
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
+    
+    def fit_transform_df(self, input_df, target_output):
+        output_df = input_df.copy()
+        for col in output_df:
+            self.fit(output_df[col], target_output)
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
 
 class BinEncoder():
     def __init__(self):
@@ -264,6 +314,27 @@ class BinEncoder():
     def transform(self, input_series):
         idx = self.model_parameters[input_series.name].searchsorted(np.arange(input_series.size))
         return idx[input_series.argsort().argsort()]
+    
+    def fit_df(self, input_df, n_bins=5):
+        for col in input_df:
+            self.fit(input_df[col], n_bins)
+        
+        return self.model_parameters
+    
+    def transform_df(self, input_df):
+        output_df = input_df.copy()
+        for col in output_df:
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
+    
+    def fit_transform_df(self, input_df, n_bins=5):
+        output_df = input_df.copy()
+        for col in output_df:
+            self.fit(output_df[col], n_bins)
+            output_df[col] = self.transform(output_df[col])
+        
+        return output_df
 
 def one_hot_encode_column(input_series):
     one_hot_df = pd.get_dummies(input_series)
@@ -286,12 +357,6 @@ def convert_utc_to_dt(input_utc):
 
 #%% TODO: 
 # - Can add enhanced imputation strategies (KNN, Decision Tree, etc.)
-
-
-
-
-# Does not require state for test transform
-
 
 
 

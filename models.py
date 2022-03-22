@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import data
 
-import lightgbm as lgb
+# import lightgbm as lgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV
@@ -14,6 +15,155 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
+#%%
+input_df = pd.read_csv('data/train.csv')
+target_name = 'SalePrice'
+split_ratios = {'train' : 0.60,
+                'validation' : 0.20,
+                'test' : 0.20}
+
+DF = data.ModelData(input_df, target_name, split_ratios)
+
+
+#%%
+
+DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
+DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
+
+DF.y_train = np.where(DF.y_train>200000, 1, 0)
+DF.y_val = np.where(DF.y_val>200000, 1, 0)
+
+#%% Fill null values
+
+si = data.SimpleImputer()
+
+DF.X_train = si.fit_transform_df(DF.X_train, strategy='mean')
+DF.X_val = si.fit_transform_df(DF.X_val, strategy='mean')
+
+#%% Scale inputs
+
+sc = data.StandardScaler()
+
+DF.X_train = sc.fit_transform_df(DF.X_train)
+DF.X_val = sc.fit_transform_df(DF.X_val)
+
+#%%
+
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+import math
+import matplotlib.pyplot as plt
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class PyTorchDataset(Dataset):
+    def __init__(self, X_train, y_train):
+        self.X = torch.from_numpy(X_train.values).float()
+        self.y = torch.from_numpy(y_train).type(torch.LongTensor) #.view(-1, 1)
+        self.n_samples = len(X_train)
+
+    def __getitem__(self, index):
+        return self.X[index], self.y[index]
+    
+    def __len__(self):
+        return self.n_samples
+
+train_dataloader = DataLoader(
+    PyTorchDataset(DF.X_train, DF.y_train),
+    batch_size=32,
+    shuffle=True)
+
+val_dataloader = DataLoader(
+    PyTorchDataset(DF.X_val, DF.y_val),
+    batch_size=32,
+    shuffle=True)
+
+# dataiter = iter(train_dataloader)
+# data = dataiter.next()
+
+#%%
+
+class MLP(nn.Module):
+    def __init__(self, input_size, hidden_size, num_classes):
+        super(MLP, self).__init__()
+        self.l1 = nn.Linear(input_size, hidden_size)
+        self.relu1 = nn.ReLU()
+        self.l2 = nn.Linear(hidden_size, hidden_size)
+        self.relu2 = nn.ReLU()
+        self.l3 = nn.Linear(hidden_size, num_classes)
+        
+    def forward(self, x):
+        out = self.l1(x)
+        out = self.relu1(out)
+        out = self.l2(out)
+        out = self.relu2(out)
+        out = self.l3(out)
+        return out
+
+
+input_size = DF.X_train.shape[1]
+hidden_size = 32
+num_classes = 2
+num_epochs = 100
+
+batch_size = 32
+learning_rate = 0.001
+
+print_every_n_iters = 10
+
+model = MLP(input_size, hidden_size, num_classes)
+
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+# training loop
+n_total_steps = len(train_dataloader)
+
+for epoch in range(num_epochs):
+    for idx, (features, targets) in enumerate(train_dataloader):
+        # Transfer to GPU if enabled
+        if device.type == 'gpu':
+            features, targets = features.to(device), targets.to(device)
+        
+        # Forward pass
+        outputs = model(features)
+        loss = criterion(outputs, targets)
+        
+        # Backwards
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        if (idx + 1) % print_every_n_iters == 0:
+            print("Epoch: {} | Step {}: Loss {:.4f}".format(
+                epoch+1, idx+1, loss.item()))
+
+#%%
+
+with torch.no_grad():
+    n_correct = 0
+    n_samples = 0
+    for idx, (features, targets) in enumerate(val_dataloader):
+        # Transfer to GPU if enabled
+        if device.type == 'gpu':
+            features, targets = features.to(device), targets.to(device)
+            
+        outputs = model(features)
+        
+        prob, predictions = torch.max(outputs, axis=1)
+        n_samples += targets.shape[0]
+        n_correct += (predictions == targets).sum().item()
+
+    accuracy = n_correct / n_samples
+    print('Accuracy: {:.2%}'.format(accuracy))
+    
+
+#%%
+
+DF.y_val.sum() / len(DF.y_val)
+
+    
 #%% Load standardized data
 
 train_data = pd.read_csv('data/std_train_data.csv')

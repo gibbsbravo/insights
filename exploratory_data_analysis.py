@@ -1,77 +1,48 @@
 import pandas as pd
 import numpy as np
+import data
 
+from pandas_profiling import ProfileReport
+import matplotlib.pyplot as plt
+import seaborn as sns
 
+#%%
 input_df = pd.read_csv('data/train.csv')
 target_name = 'SalePrice'
 split_ratios = {'train' : 0.60,
                 'validation' : 0.20,
                 'test' : 0.20}
 
-DF = ModelData(input_df, target_name, split_ratios)
+DF = data.ModelData(input_df, target_name, split_ratios)
+
+#%% Profile data
+
+def prop_column_null(input_df):
+    """Returns the proportion of null values by column"""
+    return (input_df.isnull().sum(axis = 0) / len(input_df)).sort_values(ascending=False)
+
+def prop_row_null(input_df):
+    """Returns the proportion of null values by row"""
+    return (input_df.isnull().sum(axis = 1) / len(input_df.columns)).sort_values(ascending=False)
 
 
-sc = StandardScaler()
-me = MeanEncoder()
-bin = BinEncoder()
+profile = ProfileReport(DF.X_train,
+                        minimal=True)
 
-input_df = pd.read_csv('data/train.csv')
-target_name = 'SalePrice'
-split_ratios = {'train' : 0.60,
-                'validation' : 0.20,
-                'test' : 0.20}
+profile.to_file("dataframe_profile.html")
 
-DF = ModelData(input_df, target_name, split_ratios)
+profile = DF.X_train.profile_report(check_correlation_pearson=False,
+    correlations={'pearson': False,
+    'spearman': False,
+    'kendall': False,
+    'phi_k': False,
+    'cramers': False,
+    'recoded': False})
 
 
-sc = StandardScaler()
-me = MeanEncoder()
-bin = BinEncoder()
-
-#%%
-
-me.fit(DF.X_train.MSZoning, DF.y_train)
-me.fit(DF.X_train.SaleType, DF.y_train)
-
-me.model_parameters
-
-a = mean_encode_column(DF.X_train.MSZoning, DF.y_train)
-
-b = me.transform(DF.X_train.MSZoning)
-
-bin.fit(DF.X_train.Id)
-
-bin.transform(DF.X_train.Id)
 
 #%%
 
-
-si = SimpleImputer()
-
-[si.fit(DF.X_train[col], 'mode') for col in DF.X_train.columns]
-
-for col in DF.X_train.columns:
-    DF.X_train.loc[:, col] = si.transform(DF.X_train[col])
-
-#%%
-df = DF.X_train
-prop_column_null(df)[:20]
-
-input_series = DF.X_train.LotFrontage
-
-input_series.mean()
-
-si = SimpleImputer()
-
-si.fit(DF.X_train.LotFrontage, 'mode')
-
-si.transform(DF.X_train.LotFrontage)
-
-
-balance_data(DF.X_train.select_dtypes(exclude=['object']), DF.y_train, 0.25, 'random_oversampling')
-
-
-#%% Visualize categorical features
 
 # Create function for charting bar chart 
 def categorical_bar_chart(labels, vals, title, width=0.8):
@@ -183,4 +154,83 @@ def plot_correlation_map(input_df):
     # Draw the heatmap with the mask and correct aspect ratio
     sns.heatmap(corr, mask=mask, cmap=cmap, center=0,
                 square=False, linewidths=.5, annot=True, fmt=".2f", cbar=False, yticklabels = True, xticklabels = False);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+input_df = pd.read_csv('data/train.csv')
+target_name = 'SalePrice'
+split_ratios = {'train' : 0.60,
+                'validation' : 0.20,
+                'test' : 0.20}
+
+DF = data.ModelData(input_df, target_name, split_ratios)
+
+sc = data.StandardScaler()
+me = data.MeanEncoder()
+bin = data.BinEncoder()
+
+#%%
+
+me.fit(DF.X_train.MSZoning, DF.y_train)
+me.fit(DF.X_train.SaleType, DF.y_train)
+
+me.model_parameters
+
+a = mean_encode_column(DF.X_train.MSZoning, DF.y_train)
+
+b = me.transform(DF.X_train.MSZoning)
+
+bin.fit(DF.X_train.Id)
+
+bin.transform(DF.X_train.Id)
+
+#%%
+
+
+si = SimpleImputer()
+
+[si.fit(DF.X_train[col], 'mode') for col in DF.X_train.columns]
+
+for col in DF.X_train.columns:
+    DF.X_train.loc[:, col] = si.transform(DF.X_train[col])
+
+#%%
+df = DF.X_train
+prop_column_null(df)[:20]
+
+input_series = DF.X_train.LotFrontage
+
+input_series.mean()
+
+si = SimpleImputer()
+
+si.fit(DF.X_train.LotFrontage, 'mode')
+
+si.transform(DF.X_train.LotFrontage)
+
+
+balance_data(DF.X_train.select_dtypes(exclude=['object']), DF.y_train, 0.25, 'random_oversampling')
+
+
+#%% Visualize categorical features
+
+
 
