@@ -83,24 +83,21 @@ val_dataloader = DataLoader(
 # data = dataiter.next()
 
 #%%
-
+    
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_size, num_classes):
         super(MLP, self).__init__()
-        self.l1 = nn.Linear(input_size, hidden_size)
-        self.relu1 = nn.ReLU()
-        self.l2 = nn.Linear(hidden_size, hidden_size)
-        self.relu2 = nn.ReLU()
-        self.l3 = nn.Linear(hidden_size, num_classes)
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Dropout(p=0.20),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, num_classes))
         
     def forward(self, x):
-        out = self.l1(x)
-        out = self.relu1(out)
-        out = self.l2(out)
-        out = self.relu2(out)
-        out = self.l3(out)
-        return out
-
+        x = self.network(x)
+        return x
 
 input_size = DF.X_train.shape[1]
 hidden_size = 32
@@ -117,9 +114,7 @@ model = MLP(input_size, hidden_size, num_classes)
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-# training loop
-n_total_steps = len(train_dataloader)
-
+model.train()
 for epoch in range(num_epochs):
     for idx, (features, targets) in enumerate(train_dataloader):
         # Transfer to GPU if enabled
@@ -141,6 +136,7 @@ for epoch in range(num_epochs):
 
 #%%
 
+model.eval()
 with torch.no_grad():
     n_correct = 0
     n_samples = 0
@@ -163,6 +159,37 @@ with torch.no_grad():
 
 DF.y_val.sum() / len(DF.y_val)
 
+
+#%%
+
+model2 = MLP(input_size, hidden_size, num_classes)
+
+model2.load_state_dict(model.state_dict())
+
+#%%
+
+
+
+
+#%%
+
+model2.eval()
+with torch.no_grad():
+    n_correct = 0
+    n_samples = 0
+    for idx, (features, targets) in enumerate(val_dataloader):
+        # Transfer to GPU if enabled
+        if device.type == 'gpu':
+            features, targets = features.to(device), targets.to(device)
+            
+        outputs = model2(features)
+        
+        prob, predictions = torch.max(outputs, axis=1)
+        n_samples += targets.shape[0]
+        n_correct += (predictions == targets).sum().item()
+
+    accuracy = n_correct / n_samples
+    print('Accuracy: {:.2%}'.format(accuracy))
     
 #%% Load standardized data
 
@@ -384,6 +411,21 @@ plt.xlabel('False Positive Rate')
 plt.show()
 
 
-
+# class MLP(nn.Module):
+#     def __init__(self, input_size, hidden_size, num_classes):
+#         super(MLP, self).__init__()
+#         self.l1 = nn.Linear(input_size, hidden_size)
+#         self.relu1 = nn.ReLU()
+#         self.l2 = nn.Linear(hidden_size, hidden_size)
+#         self.relu2 = nn.ReLU()
+#         self.l3 = nn.Linear(hidden_size, num_classes)
+        
+#     def forward(self, x):
+#         out = self.l1(x)
+#         out = self.relu1(out)
+#         out = self.l2(out)
+#         out = self.relu2(out)
+#         out = self.l3(out)
+#         return out
 
 
