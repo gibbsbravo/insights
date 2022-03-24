@@ -6,8 +6,10 @@ import seaborn as sns
 import os
 
 from sklearn.mixture import GaussianMixture
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering
+from scipy.cluster.hierarchy import dendrogram
 from kmodes.kmodes import KModes
+from kmodes.kprototypes import KPrototypes
 from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.decomposition import PCA
 
@@ -19,18 +21,17 @@ from sklearn.decomposition import PCA
 
 class ClusteringModels():
     def __init__(self, model_name):
-        self.valid_models = ['Kmeans', 'Kmodes', 'GMM']
+        self.valid_models = ['Kmeans', 'Kmodes', 'Kprototypes', 'GMM', 'hierarchical', 'spectral']
         assert model_name in self.valid_models, "Please select one of: {} as a model".format(self.valid_models)
         
         self.model_name = model_name
         self.n_clusters = None
         self.model = []
-        self.model_results = []
         
         model_descriptions = {
             'Kmeans':""" K-Means Summary Description:
     - Most popular clustering algorithm where each point fits in one cluster based on the linear distance to cluster centroids.
-    - Only works on Ratio variables and the values must be standardized
+    - Only works on ratio variables and the values must be standardized
     - The clusters are stochastic as they are dependent on the initial clusters""",
     
             'Kmodes':""" K-Modes Summary Description:
@@ -39,38 +40,135 @@ class ClusteringModels():
     - The clusters are stochastic as they are dependent on the initial clusters
     https://www.youtube.com/watch?v=b39_vipRkUo&ab_channel=AysanFernandes""",
     
+            'Kprototypes':""" K-Prototypes Summary Description:
+    - Combines Kmeans and Kmodes to handle mixed types
+    - Requires ratio variables to be standardized and should be used before one-hot-encoding is applied""",
+    
             'GMM':""" Gaussian Mixture Model Summary Description:
     - Assumes the data comes from n independent Gaussian distributions
     - Only works on Ratio variables and the values must be standardized
     - Uses expectation maximization to find the most likely clusters
-    - Assigns a probability to each point's cluster membership rather than hard clustering"""
-            }
+    - Assigns a probability to each point's cluster membership rather than hard clustering""",
+    
+            'hierarchical':""" Hierarchical - Agglomerative Clustering (Ward's Method) Summary Description:
+    - Recursively merges pair of clusters of sample data to minimize distance
+    - Using Ward's distance has similar performance to K-Means in terms of detected clusters
+    - Given it uses Ward's distance is still meant for ratio variables""",
+    
+            'spectral':""" Spectral Clustering Summary Description:
+    - Computes a similarity graph, projects the data onto a low-dimensional space, create the clusters
+    - Works well for non-convex clustering as there are no assumptions of the distribution of clusters
+    - Is still meant for ratio variables after standardization"""}
         self.model_description = model_descriptions[model_name]
     
-    def fit(self, input_df, n_clusters):
+    def fit(self, input_df, n_clusters, categorical_cols=[]):
         if self.model_name == 'Kmeans':
             model = KMeans(n_clusters=n_clusters, random_state=34)
             model.fit(input_df)
             
         elif self.model_name == 'Kmodes':
-            model = KModes(n_clusters=n_clusters, init='Huang')
+            model = KModes(n_clusters=n_clusters, init='Huang', random_state=34)
             model.fit(input_df)
-            
+        
+        elif self.model_name == 'Kprototypes':
+            categorical_cols_position = [input_df.columns.get_loc(col) for col in categorical_cols]
+            model = KPrototypes(n_clusters=n_clusters, init='Huang', random_state=34)
+            model.fit(input_df, categorical=categorical_cols_position)
+                        
         elif self.model_name == 'GMM':
             model = GaussianMixture(n_components=n_clusters, random_state=34)
             model.fit(input_df)
+            
+        elif self.model_name == 'hierarchical':
+            model = AgglomerativeClustering(
+                n_clusters=n_clusters,
+                linkage='ward',
+                affinity='euclidean')
+            model.fit(input_df)
         
+        elif self.model_name == 'spectral':
+            model = SpectralClustering(
+                n_clusters=n_clusters,
+                assign_labels='discretize',
+                random_state=34)
+            model.fit(input_df)
         else:
             raise Exception("Please select one of: {} as a model".format(self.valid_models))
         
         self.n_clusters = n_clusters
         self.model = model
         
-    def predict(self, input_df):
-        if self.model_name == 'LDA':
-            self.model.transform(input_df)
+    def predict(self, input_df, categorical_cols=[]):
+        if self.model_name == 'Kprototypes':
+            categorical_cols_position = [input_df.columns.get_loc(col) for col in categorical_cols]
+            return self.model.predict(input_df, categorical=categorical_cols_position)
+        
+        elif self.model_name == 'hierarchical':
+            assert len(input_df) == len(self.model.labels_), "Hierarchical clustering is non-parametric and only returns labels for values it was trained on"
+            return self.model.labels_
+        
+        elif self.model_name == 'spectral':
+            assert len(input_df) == len(self.model.labels_), "Spectral clustering is non-parametric and only returns labels for values it was trained on"
+            return self.model.labels_
+        
         else:
             return self.model.predict(input_df)
+
+#%%
+
+def elbow_approach(input_X_train, model, max_clusters=10):
+    error = []
+    
+    for n_clusters in np.arange(1, max_clusters+1):
+        if model.model_name =='Kmeans':
+            kmeans_model = ClusteringModels(model.model_name)
+            kmeans_model.fit(input_X_train, n_clusters=n_clusters)
+            error.append([n_clusters, kmeans_model.model.inertia_])
+            
+        elif model.model_name =='GMM':
+            gmm_model = ClusteringModels(model.model_name)
+            gmm_model.fit(input_X_train, n_clusters=n_clusters)
+            error.append([n_clusters, gmm_model.model.bic(input_X_train)])
+            
+        else:
+            print('Please select either kmeans or GMM')
+            
+    error = np.array(error)
+    plt.xticks(np.arange(1, max_clusters+1))
+    plt.xlabel("Number of Clusters")
+    plt.plot(error[:,0], error[:,1])
+    plt.show()
+
+m = ClusteringModels('GMM')
+elbow_approach(input_X_train, m, max_clusters=10)
+
+def plot_dendrogram(input_df, depth=3):
+    model = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(input_df)
+    
+    # create the counts of samples under each node
+    counts = np.zeros(model.children_.shape[0])
+    n_samples = len(model.labels_)
+    for i, merge in enumerate(model.children_):
+        current_count = 0
+        for child_idx in merge:
+            if child_idx < n_samples:
+                current_count += 1  # leaf node
+            else:
+                current_count += counts[child_idx - n_samples]
+        counts[i] = current_count
+
+    linkage_matrix = np.column_stack(
+        [model.children_, model.distances_, counts]
+    ).astype(float)
+
+    # Plot the corresponding dendrogram
+    plt.title("Hierarchical Clustering Dendrogram")
+    dendrogram(linkage_matrix, truncate_mode="level", p=depth)
+    plt.xlabel("Number of points in node (or index of point if no parenthesis).")
+    plt.show()
+
+#%%
+
 
 class DimensionalityReduction():
     def __init__(self, model_name):
@@ -81,23 +179,47 @@ class DimensionalityReduction():
 
 
 #%%
+m = ClusteringModels('Kmeans')
+# b = DF.X_test.select_dtypes(exclude=['O']).copy()
+b = DF.X_train
+
+m.fit(b, 5)
+a = m.predict(b, c.columns)
+
+#%%
+
+
+
+    
+
+plot_dendrogram(DF.X_train, depth=4)
+    
+
+
+iris = load_iris()
+X = iris.data
+
+
+
+
+#%%
+
+m = ClusteringModels('Kprototypes')
+
+b = DF.X_test.select_dtypes(exclude=['O']).copy()
+d = pd.concat([b, c], axis=1)
+
+m.fit(d, 5, c.columns)
+a = m.predict(d , c.columns)
+
+
+#%%
 import data
 
 si = data.SimpleImputer()
 
 DF.X_test = si.fit_transform_df(DF.X_test, 'mode')
 
-#%%
-
-
-m = ClusteringModels('Kmodes')
-
-b = DF.X_test.select_dtypes('O').copy()
-
-print(m.model_description)
-
-m.fit(b, 5)
-a = m.predict(b)
 
 #%%
 
@@ -158,25 +280,7 @@ def train_GMM(input_X_train, input_X_test=None, n_clusters=5):
         
     return pred_train_clusters, None, gm_model
 
-def elbow_approach(input_X_train, cluster_algorithm='kmeans'):
-    error = []
-    
-    n_clusters_to_consider = np.arange(1,11)
-    
-    for n_clusters in n_clusters_to_consider:
-        if cluster_algorithm =='kmeans':
-            _, _, kmeans_model = train_kmeans(input_X_train, None, n_clusters)
-            error.append([n_clusters, kmeans_model.inertia_])
-        elif cluster_algorithm =='GMM':
-            _, _, gm_model = train_GMM(input_X_train, None, n_clusters)
-            error.append([n_clusters, gm_model.bic(input_X_train)])
-        else:
-            print('Please select either kmeans or GMM')
-            
-    error = np.array(error)
-    plt.xticks(n_clusters_to_consider)
-    plt.plot(error[:,0], error[:,1])
-    plt.show()
+
 
 
 #%% PCA and visualization of clusters
