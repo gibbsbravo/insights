@@ -7,6 +7,7 @@ import os
 
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
+from kmodes.kmodes import KModes
 from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.decomposition import PCA
 
@@ -15,6 +16,121 @@ from sklearn.decomposition import PCA
 # Multiple components analysis | PCA | Latent Direchlet Allocation | Kmodes
 
 #%% Clustering Algorithms
+
+class ClusteringModels():
+    def __init__(self, model_name):
+        self.valid_models = ['Kmeans', 'Kmodes', 'GMM']
+        assert model_name in self.valid_models, "Please select one of: {} as a model".format(self.valid_models)
+        
+        self.model_name = model_name
+        self.n_clusters = None
+        self.model = []
+        self.model_results = []
+        
+        model_descriptions = {
+            'Kmeans':""" K-Means Summary Description:
+    - Most popular clustering algorithm where each point fits in one cluster based on the linear distance to cluster centroids.
+    - Only works on Ratio variables and the values must be standardized
+    - The clusters are stochastic as they are dependent on the initial clusters""",
+    
+            'Kmodes':""" K-Modes Summary Description:
+    - Similar in principle to Kmeans although uses modes and dissimilarity as the distance metric
+    - Designed for use on categorical features and should be used before one-hot-encoding is applied
+    - The clusters are stochastic as they are dependent on the initial clusters
+    https://www.youtube.com/watch?v=b39_vipRkUo&ab_channel=AysanFernandes""",
+    
+            'GMM':""" Gaussian Mixture Model Summary Description:
+    - Assumes the data comes from n independent Gaussian distributions
+    - Only works on Ratio variables and the values must be standardized
+    - Uses expectation maximization to find the most likely clusters
+    - Assigns a probability to each point's cluster membership rather than hard clustering"""
+            }
+        self.model_description = model_descriptions[model_name]
+    
+    def fit(self, input_df, n_clusters):
+        if self.model_name == 'Kmeans':
+            model = KMeans(n_clusters=n_clusters, random_state=34)
+            model.fit(input_df)
+            
+        elif self.model_name == 'Kmodes':
+            model = KModes(n_clusters=n_clusters, init='Huang')
+            model.fit(input_df)
+            
+        elif self.model_name == 'GMM':
+            model = GaussianMixture(n_components=n_clusters, random_state=34)
+            model.fit(input_df)
+        
+        else:
+            raise Exception("Please select one of: {} as a model".format(self.valid_models))
+        
+        self.n_clusters = n_clusters
+        self.model = model
+        
+    def predict(self, input_df):
+        if self.model_name == 'LDA':
+            self.model.transform(input_df)
+        else:
+            return self.model.predict(input_df)
+
+class DimensionalityReduction():
+    def __init__(self, model_name):
+        self.valid_models = ['PCA', 'MCA', 'LDA']
+        assert model_name in self.valid_models, "Please select one of: {} as a model".format(self.valid_models)
+        
+        self.model_name = model_name
+
+
+#%%
+import data
+
+si = data.SimpleImputer()
+
+DF.X_test = si.fit_transform_df(DF.X_test, 'mode')
+
+#%%
+
+
+m = ClusteringModels('Kmodes')
+
+b = DF.X_test.select_dtypes('O').copy()
+
+print(m.model_description)
+
+m.fit(b, 5)
+a = m.predict(b)
+
+#%%
+
+# Apply k-modes to binary features using 'Huang' initialization to form clusters
+def kmodes(X_train_input, X_test_input, n_clusters):
+    binary_cols = [col for col in X_train_input.columns if X_train_input[col].isin([0, 1]).all()]
+    
+    km = KModes(n_clusters=n_clusters, init='Huang')
+    km.fit(X_train_input[binary_cols])
+    
+    train_clusters = km.predict(X_train_input[binary_cols])
+    test_clusters = km.predict(X_test_input[binary_cols])
+    
+    return train_clusters, test_clusters
+
+
+
+lda = LatentDirichletAllocation(n_components=n_components, random_state=34,learning_method='batch')
+            lda.fit(X_train_input) 
+            X_train_output = pd.DataFrame(lda.transform(X_train_input),columns = 
+                                          [output_name+'_LDA'+str(p+1) for p in range(n_components)],
+                                          index=X_train_input.index)
+            X_test_output = pd.DataFrame(lda.transform(X_test_input),columns = 
+                                         [output_name+'_LDA'+str(p+1) for p in range(n_components)],
+                                         index=X_test_input.index)
+            return X_train_output, X_test_output
+
+def get_kmeans():
+    
+
+
+
+
 
 def train_kmeans(input_X_train, input_X_test=None, n_clusters=5):
     kmeans_model = KMeans(n_clusters=n_clusters, random_state=34)
