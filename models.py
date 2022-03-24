@@ -2,9 +2,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import data
 
-# import lightgbm as lgb
+import lightgbm as lgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV
@@ -12,40 +11,181 @@ from sklearn.model_selection import cross_val_score
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_curve
 
+import data
+import exploratory_data_analysis as eda
+import unsupervised_learning
+
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
-#%%
+#%% Load standardized data
 input_df = pd.read_csv('data/train.csv')
+input_df.drop(['PoolArea', 'PoolQC', '3SsnPorch', 'Alley', 'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'], axis=1, inplace=True)
+
 target_name = 'SalePrice'
 split_ratios = {'train' : 0.60,
                 'validation' : 0.20,
                 'test' : 0.20}
 
+
 DF = data.ModelData(input_df, target_name, split_ratios)
 
 
-#%%
-
+# Remove strings
 DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
 DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
 
 DF.y_train = np.where(DF.y_train>200000, 1, 0)
 DF.y_val = np.where(DF.y_val>200000, 1, 0)
 
-#%% Fill null values
-
+#Fill null values
 si = data.SimpleImputer()
 
 DF.X_train = si.fit_transform_df(DF.X_train, strategy='mean')
 DF.X_val = si.fit_transform_df(DF.X_val, strategy='mean')
 
-#%% Scale inputs
-
+# Scale inputs
 sc = data.StandardScaler()
 
 DF.X_train = sc.fit_transform_df(DF.X_train)
 DF.X_val = sc.fit_transform_df(DF.X_val)
+
+# Remove Outliers
+outliers = eda.get_isolation_forest_outliers(DF.X_train)
+
+DF.X_train.drop(outliers['outlier_rows'].index,inplace=True)
+DF.X_train.reset_index(inplace=True, drop=True)
+
+#%% Classification Models
+
+#%% Naive Model
+def majority_class(y_train_input, y_test_input):
+    majority_class = int(y_train_input.mean()) 
+    naive_train_preds = [majority_class] * len(y_train_input)
+    naive_test_preds = [majority_class] * len(y_test_input)
+    
+    train_accuracy = (naive_train_preds == y_train_input).sum() / len(y_train_input)
+    test_accuracy = (naive_test_preds == y_test_input).sum() / len(y_test_input)
+    
+    return naive_train_preds, naive_test_preds, train_accuracy, test_accuracy, majority_class
+
+#%% Train LightGBM model with optional gridsearch hyperparameter tuning
+# Returns key evaluation metrics
+def light_gbm(X_train_input, y_train_input, X_test_input, y_test_input,
+              num_leaves=15, n_estimators=250, gridsearch=False):
+
+    if gridsearch:
+        # Gridsearch optimal number of leaves
+        parameters = {'num_leaves':[5,15,30,60,90]}
+
+        lgbm = lgb.LGBMClassifier(num_leaves=num_leaves, n_estimators=n_estimators,
+                                  objective='binary', random_state=34)
+        clf = GridSearchCV(lgbm, parameters).fit(X_train_input, y_train_input)
+        print ("Best Parameters:", clf.best_params_)
+
+        num_leaves = clf.best_params_['num_leaves']
+        
+    lgbm_clf = lgb.LGBMClassifier(
+            num_leaves=num_leaves, n_estimators=n_estimators, objective='binary',
+            random_state=34).fit(X_train_input,y_train_input.values.ravel())
+    
+    lgbm_train_preds = lgbm_clf.predict(X_train_input)
+    lgbm_test_preds = lgbm_clf.predict(X_test_input)
+    
+    lgbm_pred_probs = lgbm_clf.predict_proba(X_test_input)
+    y_pred = lgbm_pred_probs[:,1]
+    
+    AUC = roc_auc_score(y_test_input, y_pred)
+    train_accuracy = lgbm_clf.score(X_train_input, y_train_input) 
+    test_accuracy = lgbm_clf.score(X_test_input, y_test_input)
+    
+    lgbm_feature_importance = lgbm_clf.feature_importances_
+    
+    # Check the variable importance
+    lgbm_feature_importance = lgbm_clf.feature_importances_
+    lgbm_feature_importance = pd.DataFrame(lgbm_feature_importance, 
+                              columns=["importance"],
+                              index = X_train_input.columns)
+    lgbm_feature_importance.sort_values(by='importance',ascending=False,inplace=True)
+    
+    return (lgbm_train_preds, lgbm_test_preds, AUC, train_accuracy,
+            test_accuracy, lgbm_pred_probs, lgbm_clf, lgbm_feature_importance)
+
+
+#%% Train logistic regression model with optional gridsearch hyperparameter tuning
+
+def logistic_regression(X_train_input, y_train_input, X_test_input, y_test_input,
+                        C=1, gridsearch=False):
+    if gridsearch:
+        # Gridsearch C value
+        parameters = {'C':[0.01,0.1,1,10,100]}
+
+        clf = GridSearchCV(LogisticRegression(C=C), parameters).fit(
+                X_train_input, y_train_input)
+        print ("Best Parameters:", clf.best_params_)
+
+        C = clf.best_params_['C']
+
+    logr_clf = LogisticRegression(C=C).fit(X_train_input, y_train_input)
+    
+    logr_train_preds = logr_clf.predict(X_train_input)
+    logr_test_preds = logr_clf.predict(X_test_input)
+
+    logr_pred_probs = logr_clf.predict_proba(X_test_input)
+    y_pred = logr_pred_probs[:,1]
+    
+    AUC = roc_auc_score(y_test_input, y_pred)
+    train_accuracy = logr_clf.score(X_train_input, y_train_input) 
+    test_accuracy = logr_clf.score(X_test_input, y_test_input)
+    
+    return (logr_train_preds, logr_test_preds, AUC, train_accuracy,
+            test_accuracy, logr_pred_probs, logr_clf)
+
+#%% Train random forest model with optional gridsearch hyperparameter tuning
+
+def random_forest(X_train_input, y_train_input, X_test_input, y_test_input,
+                  max_depth=10, gridsearch=False):
+    
+    if gridsearch:
+        # Gridsearch max tree depth
+        n_features = len(X_train_input.columns)
+        parameters = {'max_depth':[int(n_features*0.25), int(n_features*0.50), 
+                                   int(n_features*0.75), int(n_features), None]}
+
+        clf = GridSearchCV(RandomForestClassifier(n_estimators=200, max_depth=max_depth,
+            max_features='sqrt', n_jobs=4, random_state=34), parameters).fit(
+                X_train_input, y_train_input)
+        print ("Best Parameters:", clf.best_params_)
+
+        max_depth = clf.best_params_['max_depth']
+    
+    rf_clf = RandomForestClassifier(n_estimators=200, max_depth=max_depth,
+            max_features='sqrt', n_jobs=4, random_state=34)
+        
+    rf_clf.fit(X_train, y_train)
+    
+    rf_train_preds = rf_clf.predict(X_train_input)
+    rf_test_preds = rf_clf.predict(X_test_input)
+
+    rf_pred_probs = rf_clf.predict_proba(X_test_input)
+    y_pred = rf_pred_probs[:,1]
+    
+    AUC = roc_auc_score(y_test_input, y_pred)
+    train_accuracy = rf_clf.score(X_train_input, y_train_input) 
+    test_accuracy = rf_clf.score(X_test_input, y_test_input)
+    
+    # Check the feature importance
+    rf_feature_importance = rf_clf.feature_importances_
+    rf_feature_importance = pd.DataFrame(rf_feature_importance, 
+                              columns=["importance"],
+                              index = X_train_input.columns)
+    rf_feature_importance.sort_values(by='importance', ascending=False, inplace=True)
+
+    return (rf_train_preds, rf_test_preds, AUC, train_accuracy,
+            test_accuracy, rf_pred_probs, rf_clf, rf_feature_importance)
+
+
+
 
 #%%
 
@@ -199,131 +339,7 @@ test_data = pd.read_csv('data/std_test_data.csv')
 X_train, y_train = train_data.loc[:, train_data.columns != 'target'], train_data['target']
 X_test, y_test = test_data.loc[:, test_data.columns != 'target'], test_data['target']
 
-#%% Naive Model
-def majority_class(y_train_input, y_test_input):
-    majority_class = int(y_train_input.mean()) 
-    naive_train_preds = [majority_class] * len(y_train_input)
-    naive_test_preds = [majority_class] * len(y_test_input)
-    
-    train_accuracy = (naive_train_preds == y_train_input).sum() / len(y_train_input)
-    test_accuracy = (naive_test_preds == y_test_input).sum() / len(y_test_input)
-    
-    return naive_train_preds, naive_test_preds, train_accuracy, test_accuracy, majority_class
 
-#%% Train LightGBM model with optional gridsearch hyperparameter tuning
-# Returns key evaluation metrics
-def light_gbm(X_train_input, y_train_input, X_test_input, y_test_input,
-              num_leaves=15, n_estimators=250, gridsearch=False):
-
-    if gridsearch:
-        # Gridsearch optimal number of leaves
-        parameters = {'num_leaves':[5,15,30,60,90]}
-
-        lgbm = lgb.LGBMClassifier(num_leaves=num_leaves, n_estimators=n_estimators,
-                                  objective='binary', random_state=34)
-        clf = GridSearchCV(lgbm, parameters).fit(X_train_input, y_train_input)
-        print ("Best Parameters:", clf.best_params_)
-
-        num_leaves = clf.best_params_['num_leaves']
-        
-    lgbm_clf = lgb.LGBMClassifier(
-            num_leaves=num_leaves, n_estimators=n_estimators, objective='binary',
-            random_state=34).fit(X_train_input,y_train_input.values.ravel())
-    
-    lgbm_train_preds = lgbm_clf.predict(X_train_input)
-    lgbm_test_preds = lgbm_clf.predict(X_test_input)
-    
-    lgbm_pred_probs = lgbm_clf.predict_proba(X_test_input)
-    y_pred = lgbm_pred_probs[:,1]
-    
-    AUC = roc_auc_score(y_test_input, y_pred)
-    train_accuracy = lgbm_clf.score(X_train_input, y_train_input) 
-    test_accuracy = lgbm_clf.score(X_test_input, y_test_input)
-    
-    lgbm_feature_importance = lgbm_clf.feature_importances_
-    
-    # Check the variable importance
-    lgbm_feature_importance = lgbm_clf.feature_importances_
-    lgbm_feature_importance = pd.DataFrame(lgbm_feature_importance, 
-                              columns=["importance"],
-                              index = X_train_input.columns)
-    lgbm_feature_importance.sort_values(by='importance',ascending=False,inplace=True)
-    
-    return (lgbm_train_preds, lgbm_test_preds, AUC, train_accuracy,
-            test_accuracy, lgbm_pred_probs, lgbm_clf, lgbm_feature_importance)
-
-
-#%% Train logistic regression model with optional gridsearch hyperparameter tuning
-
-def logistic_regression(X_train_input, y_train_input, X_test_input, y_test_input,
-                        C=1, gridsearch=False):
-    if gridsearch:
-        # Gridsearch C value
-        parameters = {'C':[0.01,0.1,1,10,100]}
-
-        clf = GridSearchCV(LogisticRegression(C=C), parameters).fit(
-                X_train_input, y_train_input)
-        print ("Best Parameters:", clf.best_params_)
-
-        C = clf.best_params_['C']
-
-    logr_clf = LogisticRegression(C=C).fit(X_train_input, y_train_input)
-    
-    logr_train_preds = logr_clf.predict(X_train_input)
-    logr_test_preds = logr_clf.predict(X_test_input)
-
-    logr_pred_probs = logr_clf.predict_proba(X_test_input)
-    y_pred = logr_pred_probs[:,1]
-    
-    AUC = roc_auc_score(y_test_input, y_pred)
-    train_accuracy = logr_clf.score(X_train_input, y_train_input) 
-    test_accuracy = logr_clf.score(X_test_input, y_test_input)
-    
-    return (logr_train_preds, logr_test_preds, AUC, train_accuracy,
-            test_accuracy, logr_pred_probs, logr_clf)
-
-#%% Train random forest model with optional gridsearch hyperparameter tuning
-
-def random_forest(X_train_input, y_train_input, X_test_input, y_test_input,
-                  max_depth=10, gridsearch=False):
-    
-    if gridsearch:
-        # Gridsearch max tree depth
-        n_features = len(X_train_input.columns)
-        parameters = {'max_depth':[int(n_features*0.25), int(n_features*0.50), 
-                                   int(n_features*0.75), int(n_features), None]}
-
-        clf = GridSearchCV(RandomForestClassifier(n_estimators=200, max_depth=max_depth,
-            max_features='sqrt', n_jobs=4, random_state=34), parameters).fit(
-                X_train_input, y_train_input)
-        print ("Best Parameters:", clf.best_params_)
-
-        max_depth = clf.best_params_['max_depth']
-    
-    rf_clf = RandomForestClassifier(n_estimators=200, max_depth=max_depth,
-            max_features='sqrt', n_jobs=4, random_state=34)
-        
-    rf_clf.fit(X_train, y_train)
-    
-    rf_train_preds = rf_clf.predict(X_train_input)
-    rf_test_preds = rf_clf.predict(X_test_input)
-
-    rf_pred_probs = rf_clf.predict_proba(X_test_input)
-    y_pred = rf_pred_probs[:,1]
-    
-    AUC = roc_auc_score(y_test_input, y_pred)
-    train_accuracy = rf_clf.score(X_train_input, y_train_input) 
-    test_accuracy = rf_clf.score(X_test_input, y_test_input)
-    
-    # Check the feature importance
-    rf_feature_importance = rf_clf.feature_importances_
-    rf_feature_importance = pd.DataFrame(rf_feature_importance, 
-                              columns=["importance"],
-                              index = X_train_input.columns)
-    rf_feature_importance.sort_values(by='importance', ascending=False, inplace=True)
-
-    return (rf_train_preds, rf_test_preds, AUC, train_accuracy,
-            test_accuracy, rf_pred_probs, rf_clf, rf_feature_importance)
 
 #%% Train models
     

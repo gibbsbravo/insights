@@ -14,10 +14,7 @@ from sklearn.decomposition import PCA, LatentDirichletAllocation, NMF
 
 # %matplotlib inline
 
-# Multiple components analysis | PCA | Latent Direchlet Allocation | Kmodes
-
 #%% Clustering Algorithms
-
 class ClusteringModels():
     def __init__(self, model_name):
         self.valid_models = ['Kmeans', 'Kmodes', 'Kprototypes', 'GMM', 'hierarchical', 'spectral']
@@ -113,7 +110,11 @@ class ClusteringModels():
         else:
             return self.model.predict(input_df)
 
-#%%
+def get_kmeans_centroids(input_df, kmeans_model):
+    closest, _ = pairwise_distances_argmin_min(kmeans_model.cluster_centers_, input_df)
+    return input_df.iloc[closest]
+
+#%% Visualize optimal number of clusters
 
 def elbow_approach(input_X_train, model, max_clusters=10):
     valid_models = ['Kmeans', 'Kmodes', 'Kprototypes', 'GMM']
@@ -176,7 +177,7 @@ def plot_dendrogram(input_df, depth=3):
     plt.xlabel("Number of points in node (or index of point if no parenthesis).")
     plt.show()
 
-#%%
+#%% Dimensionality reduction
 
 class DimensionalityReduction():
     def __init__(self, model_name):
@@ -202,6 +203,25 @@ class DimensionalityReduction():
                 init='random',
                 random_state=34)
             model.fit(input_df)
+        
+        elif self.model_name == 'LDA':
+            model = LatentDirichletAllocation(
+                n_components=n_components, 
+                learning_method='batch',
+                random_state=34)
+            model.fit(input_df)
+            
+        elif self.model_name == 'NMF':
+            model = NMF(
+                n_components=n_components,
+                init='nndsvda',
+                solver="mu", 
+                max_iter=400,
+                random_state=34)
+            model.fit(input_df)
+        
+        else:
+            raise Exception("Please select one of: {} as a model".format(self.valid_models))
             
         self.n_components = n_components
         self.model = model
@@ -218,163 +238,18 @@ class DimensionalityReduction():
                 self.model.transform(input_df),
                 columns = [self.model_name+str(p+1) for p in range(self.n_components)],
                 index=input_df.index)
-        
-        
-#%%
-
-pca = DimensionalityReduction('TSNE')
-
-pca.fit(DF.X_train, 2)
-a = pca.transform(DF.X_train)
-
-pca.model_information
-
-
-#%%
-
-
-# si = data.SimpleImputer()
-# DF.X_test = si.fit_transform_df(DF.X_test, 'mode')
-# a = DF.X_test.select_dtypes('O').copy()
-
-m = ClusteringModels('Kprototypes')
-
-elbow_approach(
-    pd.concat([DF.X_test.select_dtypes(exclude=['O']), DF.X_test[['MSZoning', 'SaleCondition']]], axis=1),
-    m)
-
-m.model.inertia_
-
-#%%
-
-
-elbow_approach(input_X_train, m, max_clusters=10)
-
-
-#%%
-
-
-
-
-
-#%%
-m = ClusteringModels('Kmeans')
-# b = DF.X_test.select_dtypes(exclude=['O']).copy()
-b = DF.X_train
-
-m.fit(b, 5)
-a = m.predict(b, c.columns)
-
-#%%
-
-
-
-    
-
-plot_dendrogram(DF.X_train, depth=4)
-    
-
-
-iris = load_iris()
-X = iris.data
-
-
-
-
-#%%
-
-m = ClusteringModels('Kprototypes')
-
-b = DF.X_test.select_dtypes(exclude=['O']).copy()
-d = pd.concat([b, c], axis=1)
-
-m.fit(d, 5, c.columns)
-a = m.predict(d , c.columns)
-
-
-#%%
-import data
-
-si = data.SimpleImputer()
-
-DF.X_test = si.fit_transform_df(DF.X_test, 'mode')
-
-
-#%%
-
-# Apply k-modes to binary features using 'Huang' initialization to form clusters
-def kmodes(X_train_input, X_test_input, n_clusters):
-    binary_cols = [col for col in X_train_input.columns if X_train_input[col].isin([0, 1]).all()]
-    
-    km = KModes(n_clusters=n_clusters, init='Huang')
-    km.fit(X_train_input[binary_cols])
-    
-    train_clusters = km.predict(X_train_input[binary_cols])
-    test_clusters = km.predict(X_test_input[binary_cols])
-    
-    return train_clusters, test_clusters
-
-
-
-# lda = LatentDirichletAllocation(n_components=n_components, random_state=34,learning_method='batch')
-#             lda.fit(X_train_input) 
-#             X_train_output = pd.DataFrame(lda.transform(X_train_input),columns = 
-#                                           [output_name+'_LDA'+str(p+1) for p in range(n_components)],
-#                                           index=X_train_input.index)
-#             X_test_output = pd.DataFrame(lda.transform(X_test_input),columns = 
-#                                          [output_name+'_LDA'+str(p+1) for p in range(n_components)],
-#                                          index=X_test_input.index)
-#             return X_train_output, X_test_output
-
-
-
-
-def train_kmeans(input_X_train, input_X_test=None, n_clusters=5):
-    kmeans_model = KMeans(n_clusters=n_clusters, random_state=34)
-    kmeans_model.fit(input_X_train)
-
-    pred_train_clusters = kmeans_model.predict(input_X_train)
-    if input_X_test is not None:
-        pred_test_clusters = kmeans_model.predict(input_X_test)
-        return pred_train_clusters, pred_test_clusters, kmeans_model
-    
-    return pred_train_clusters, None, kmeans_model
-
-def get_centroids(input_df, kmeans_model):
-    closest, _ = pairwise_distances_argmin_min(kmeans_model.cluster_centers_, input_df)
-    return input_df.iloc[closest]
-    
-def train_GMM(input_X_train, input_X_test=None, n_clusters=5):
-    gm_model = GaussianMixture(n_components=n_clusters)
-    gm_model.fit(input_X_train)
-    
-    pred_train_clusters = gm_model.predict(input_X_train)
-    if input_X_test is not None:
-        pred_test_clusters = gm_model.predict(input_X_test)
-        return pred_train_clusters, pred_test_clusters, gm_model
-        
-    return pred_train_clusters, None, gm_model
-
-
-
-
-#%% PCA and visualization of clusters
-
-def reduce_dimensionality(input_X_train, input_X_test, n_components=2):
-    pca = PCA(n_components=n_components).fit(input_X_train)
-    print('PCA Output:')
-    print(pca.explained_variance_ratio_, 'Total:', 
-          pca.explained_variance_ratio_.sum().round(2))
-    X_train_PCA = pd.DataFrame(pca.transform(input_X_train),columns = 
-                                  ['PC'+str(p+1) for p in range(n_components)],
-                                  index=input_X_train.index)
-    X_test_PCA = pd.DataFrame(pca.transform(input_X_test),columns = 
-                                 ['PC'+str(p+1) for p in range(n_components)],
-                                 index=input_X_test.index)
-    return X_train_PCA, X_test_PCA
-
 
 #%% Plot clusters
+
+def plot_components_by_feature(input_component_values, input_series):
+    assert len(input_component_values.columns) == 2, "Please select two components"
+    plt.scatter(
+        input_component_values.iloc[:, 0],
+        input_component_values.iloc[:, 1],
+        c=input_series,
+        cmap=sns.color_palette("viridis", as_cmap=True))
+    plt.axis('off')
+    plt.show()
 
 def plot_cluster_feat_means(input_df):
     cluster_feature_means = input_df.groupby(by='cluster').mean()
@@ -400,79 +275,3 @@ def plot_ind_cluster_feature_means(input_df):
         plt.ylabel("Value")
         plt.show()
     return cluster_feature_means
-
-#%% Load standardized data
-
-import data
-import exploratory_data_analysis as eda
-
-input_df = pd.read_csv('data/train.csv')
-input_df.drop(['PoolArea', 'PoolQC', '3SsnPorch', 'Alley', 'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'], axis=1, inplace=True)
-
-target_name = 'SalePrice'
-split_ratios = {'train' : 0.60,
-                'validation' : 0.20,
-                'test' : 0.20}
-
-
-DF = data.ModelData(input_df, target_name, split_ratios)
-
-
-# Remove strings
-DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
-DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
-
-DF.y_train = np.where(DF.y_train>200000, 1, 0)
-DF.y_val = np.where(DF.y_val>200000, 1, 0)
-
-#Fill null values
-si = data.SimpleImputer()
-
-DF.X_train = si.fit_transform_df(DF.X_train, strategy='mean')
-DF.X_val = si.fit_transform_df(DF.X_val, strategy='mean')
-
-# Scale inputs
-sc = data.StandardScaler()
-
-DF.X_train = sc.fit_transform_df(DF.X_train)
-DF.X_val = sc.fit_transform_df(DF.X_val)
-
-# Remove Outliers
-outliers = eda.get_isolation_forest_outliers(DF.X_train)
-
-DF.X_train.drop(outliers['outlier_rows'].index,inplace=True)
-DF.X_train.reset_index(inplace=True, drop=True)
-
-
-#%% Find out correct number of clusters and fit models
-# # Elbow approach to select n clusters
-# elbow_approach(DF.X_train, 'kmeans')
-# elbow_approach(DF.X_train, 'GMM')
-
-# X_train_PCA, X_val_PCA = reduce_dimensionality(DF.X_train, DF.X_val)
-
-# train_clusters, val_clusters, kmeans_model = train_kmeans(DF.X_train, DF.X_val, n_clusters=4)
-
-# X_train_PCA['cluster'] = train_clusters
-# X_val_PCA['cluster'] = val_clusters
-
-# plt.scatter(X_train_PCA['PC1'], X_train_PCA['PC2'], c=train_clusters, cmap='Dark2')
-# plt.show()
-
-# #%% See relationship between clusters and features
-
-# # Add the clusters to the data
-# DF.X_train['cluster'] = train_clusters
-
-# std_cluster_feature_means = plot_cluster_feat_means(DF.X_train)
-# print()
-# print('Standardized Average Feature Values: ')
-# print(np.around(std_cluster_feature_means.reset_index(), 2).T)
-
-
-# raw_cluster_feature_means = plot_ind_cluster_feature_means(DF.X_train)
-# print()
-# print('Average Feature Values: ')
-# print(np.around(raw_cluster_feature_means.reset_index(), 2))
-
-
