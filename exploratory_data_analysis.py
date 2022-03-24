@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-from scipy.stats import norm, uniform, lognorm, expon
+from scipy.stats import norm, uniform, expon
 from pandas_profiling import ProfileReport
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -9,19 +9,8 @@ from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 import os
 
-import data
-
-%matplotlib inline
+# %matplotlib inline
 sns.set_style("white")
-
-#%%
-input_df = pd.read_csv('data/train.csv')
-target_name = 'SalePrice'
-split_ratios = {'train' : 0.60,
-                'validation' : 0.20,
-                'test' : 0.20}
-
-DF = data.ModelData(input_df, target_name, split_ratios)
 
 #%% Profile data
 
@@ -54,10 +43,9 @@ def create_html_data_profile(input_df, output_file_path, overwrite=False):
 
 #%% Plot Correlation and Pair Plot 
 
-
 def pair_plot(input_X_train, input_y_train):
     input_df = pd.concat([input_X_train, input_y_train], axis=1)
-    pp = sns.pairplot(
+    sns.pairplot(
         input_df, 
         diag_kind='hist', 
         plot_kws=dict(s=14, alpha=.2, linewidth=0))
@@ -67,21 +55,18 @@ def plot_correlation_map(input_X_train, input_y_train):
     input_df = pd.concat([input_X_train, input_y_train], axis=1)   
     fig, ax = plt.subplots(figsize = [14,12])
     colormap = sns.diverging_palette(10, 220, as_cmap=True)
-    fig = sns.heatmap(input_df.corr(),
+    sns.heatmap(input_df.corr(),
                 cmap = colormap,
                 center = 0,
                 annot = True,
                 linewidths = 0.1,
                 fmt=".2f")
 
-#%%
-
-
-# Calculate the differences between datasets for a given feature
-# Are focusing on the differences between the means of the various features
-    # and want to focus on only the most extreme instances
-# Given some features have a high number of unique values (i.e. borough) function accepts
-    # a maximum number of elements
+#%% # Calculate the differences between datasets for a given categorial feature
+    # Are focusing on the differences between the means of the various features
+        # and want to focus on only the most extreme instances
+    # Given some features have a high number of unique values, function accepts
+        # a maximum number of elements
 
 # Create function for charting bar chart 
 def categorical_bar_chart(labels, vals, title, width=0.8):
@@ -123,7 +108,7 @@ def calculate_differences(input_X_train, input_y_train, feature_list, max_compar
         delta = (positive_series_norm) - (negative_series_norm)
         delta.sort_values(ascending=False, inplace=True)
     
-        if len(positive_series_norm) > max_elements: 
+        if len(positive_series_norm) > max_compare_elements: 
             largest_difference = pd.concat([delta[:min(len(positive_series), int(max_compare_elements/2))],
                                             delta[-min(len(positive_series), int(max_compare_elements/2)):]])
         else:
@@ -136,7 +121,7 @@ def calculate_differences(input_X_train, input_y_train, feature_list, max_compar
     
     return True
 
-#%%
+#%% Quantile-Quantile plot 
 
 def get_qq_plot(input_series, comparison_distribution='normal'):
     valid_comparison_distributions = ['normal', 'uniform', 'exponential']
@@ -144,15 +129,16 @@ def get_qq_plot(input_series, comparison_distribution='normal'):
         sm.qqplot(input_series, norm, fit=True, line="45")
         
     elif comparison_distribution == 'uniform':
-        sm.qqplot(input_series, uniform, line="45")
+        sm.qqplot(input_series, uniform, fit=True, line="45")
     
     elif comparison_distribution == 'exponential':
-        sm.qqplot(input_series, expon, line="45")
+        sm.qqplot(input_series, expon, fit=True, line="45")
         
     else:
         print("Please select one of: {} as comparison distribution".format(
             valid_comparison_distributions))
 
+#%% Outlier detection
 
 def is_IQR_outlier(input_series):
     assert input_series.dtype != 'O', "Cannot use inter-quartile range for strings"
@@ -168,7 +154,7 @@ def get_IQR_outliers(input_X_train, n_threshold=2):
     IQR_outliers = input_X_train.apply(is_IQR_outlier, axis=0)
     results['n_outliers_by_col'] = IQR_outliers.sum(axis=0).sort_values(ascending=False)
     results['n_outliers_by_row'] = IQR_outliers.sum(axis=1)
-    results['outlier_rows'] = input_X_train.loc[n_outliers_by_row > n_threshold]
+    results['outlier_rows'] = input_X_train.loc[results['n_outliers_by_row'] > n_threshold]
     results['outlier_proportion'] = np.around(len(results['outlier_rows']) / len(input_X_train), 2)
     return results
 
@@ -189,15 +175,4 @@ def get_local_outlier_factor_outliers(input_X_train, n_neighbors=20, est_outlier
     results['outlier_rows'] = input_X_train.loc[lof_outliers == -1]
     results['outlier_proportion'] = np.around(len(results['outlier_rows']) / len(input_X_train), 2)
     return results
-
-
-
-
-
-
-
-
-
-
-
 
