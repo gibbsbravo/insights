@@ -1,10 +1,18 @@
 import pandas as pd
 import numpy as np
-import data
-
+import statsmodels.api as sm
+from scipy.stats import norm, uniform, lognorm, expon
 from pandas_profiling import ProfileReport
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+import os
+
+import data
+
+%matplotlib inline
+sns.set_style("white")
 
 #%%
 input_df = pd.read_csv('data/train.csv')
@@ -26,23 +34,54 @@ def prop_row_null(input_df):
     return (input_df.isnull().sum(axis = 1) / len(input_df.columns)).sort_values(ascending=False)
 
 
-profile = ProfileReport(DF.X_train,
-                        minimal=True)
+def create_html_data_profile(input_df, output_file_path, overwrite=False):
+    _, file_extension = os.path.splitext(output_file_path)
+    if file_extension != '.html':
+        output_file_path+'.html'
+        
+    if (overwrite is False) & (os.path.exists(output_file_path)):
+        raise Exception("File '{}' exists. Please either set overwrite=True or rename the file.".format(
+            output_file_path))
+    
+    
+    profile = ProfileReport(input_df,
+                            minimal=True)
 
-profile.to_file("dataframe_profile.html")
-
-profile = DF.X_train.profile_report(check_correlation_pearson=False,
-    correlations={'pearson': False,
-    'spearman': False,
-    'kendall': False,
-    'phi_k': False,
-    'cramers': False,
-    'recoded': False})
+    profile.to_file(output_file_path)
+    
+    return True
 
 
+#%% Plot Correlation and Pair Plot 
+
+
+def pair_plot(input_X_train, input_y_train):
+    input_df = pd.concat([input_X_train, input_y_train], axis=1)
+    pp = sns.pairplot(
+        input_df, 
+        diag_kind='hist', 
+        plot_kws=dict(s=14, alpha=.2, linewidth=0))
+    plt.show()
+
+def plot_correlation_map(input_X_train, input_y_train):
+    input_df = pd.concat([input_X_train, input_y_train], axis=1)   
+    fig, ax = plt.subplots(figsize = [14,12])
+    colormap = sns.diverging_palette(10, 220, as_cmap=True)
+    fig = sns.heatmap(input_df.corr(),
+                cmap = colormap,
+                center = 0,
+                annot = True,
+                linewidths = 0.1,
+                fmt=".2f")
 
 #%%
 
+
+# Calculate the differences between datasets for a given feature
+# Are focusing on the differences between the means of the various features
+    # and want to focus on only the most extreme instances
+# Given some features have a high number of unique values (i.e. borough) function accepts
+    # a maximum number of elements
 
 # Create function for charting bar chart 
 def categorical_bar_chart(labels, vals, title, width=0.8):
@@ -57,180 +96,108 @@ def categorical_bar_chart(labels, vals, title, width=0.8):
     plt.ylabel('Proportion of Total')
     plt.legend(('True', 'False'))
 
-# Create function for charting scatter plot
-def scatter_plot(array1_norm, array2_norm, title):
-    plt.title(title)
-    plt.scatter(array1_norm,array2_norm);
-    line = np.linspace(0.0,max(array1_norm)+.01,10)
-    plt.plot(line,line, '--r');
-    plt.ylabel('Proportion True')
-    plt.xlabel('Proportion False')
-
-    for i, txt in enumerate(array1_norm.index):
-        plt.annotate(txt, (array1_norm.iloc[i], array2_norm.iloc[i]))
-
-# Calculate the differences between datasets for a given feature
-# Are focusing on the differences between the means of the various features
-    # and want to focus on only the most extreme instances
-# Given some features have a high number of unique values (i.e. borough) function accepts
-    # a maximum number of elements
-
-def calculate_differences(feature, chart, max_elements = 10):    
-    array1 = positive_df[feature]
-    array2 = negative_df[feature]
+def calculate_differences(input_X_train, input_y_train, feature_list, max_compare_elements=10):
+    positive_df = input_X_train.loc[input_y_train == 1]
+    negative_df = input_X_train.loc[input_y_train == 0]
     
-    array1_norm = array1.value_counts()/len(array1)
-    array2_norm = array2.value_counts()/len(array2)
-    
-    # Ensure arrays have the same elements for comparison
-    shared_elements = array1_norm.index.intersection(array1_norm.index)
-    array1_norm = array1_norm.loc[shared_elements]
-    array2_norm = array2_norm.loc[shared_elements]
-    
-    assert len(array1_norm) == len(array2_norm), 'Arrays are not equal'
-    
-    # In cases with more groupings than max_elements,include only most extreme elements
-    delta = (array1_norm) - (array2_norm)
-    delta.sort_values(ascending=False, inplace=True)
-
-    if len(array1_norm) > max_elements: 
-        largest_difference = pd.concat([delta[:min(len(array1),int(max_elements/2))],
-                                        delta[-min(len(array1),int(max_elements/2)):]])
-    else:
-        largest_difference = delta
+    for feature in feature_list:
+        positive_series = positive_df[feature]
+        negative_series = negative_df[feature]
+         
+        positive_series_norm = positive_series.value_counts()/len(positive_series)
+        negative_series_norm = negative_series.value_counts()/len(negative_series)
+     
+        # Add elements if not contained in series
+        elements_only_in_positive = list(set(positive_series_norm.index) - set(negative_series_norm.index))
+        elements_only_in_negative = list(set(negative_series_norm.index) - set(positive_series_norm.index))
+     
+        for element in elements_only_in_positive:
+            negative_series_norm[element] = 0
+            
+        for element in elements_only_in_negative:
+            positive_series_norm[element] = 0
+             
+        assert len(positive_series_norm) == len(negative_series_norm), 'Arrays are not equal'
         
-    # Select which chart output is preferred (between scatter and bar)
-    if chart.lower() == 'bar':
-        difference_array = [array1_norm.loc[largest_difference.index], array2_norm.loc[largest_difference.index]]
-        return categorical_bar_chart(largest_difference.index,difference_array,feature)
+        # In cases with more groupings than max_elements,include only most extreme elements
+        delta = (positive_series_norm) - (negative_series_norm)
+        delta.sort_values(ascending=False, inplace=True)
     
-    else:
-        return scatter_plot(array1_norm.loc[largest_difference.index], array2_norm.loc[largest_difference.index], feature)
-
-# Create layout for multiple charts and plot using for loop
-def examine_features(features_list):
-    columns = 2
-    rows = len(features_list)
-    fig = plt.figure(figsize=(12, 6*rows))
-    j = 0
-
-    for i in range(rows*columns):
-        fig.add_subplot(rows, columns, i+1)
-
-        if i % 2 == 0:
-            calculate_differences(features_list[j], 'scatter')
+        if len(positive_series_norm) > max_elements: 
+            largest_difference = pd.concat([delta[:min(len(positive_series), int(max_compare_elements/2))],
+                                            delta[-min(len(positive_series), int(max_compare_elements/2)):]])
         else:
-            calculate_differences(features_list[j], 'bar')
-            j += 1
-
-    plt.tight_layout()
-    plt.show()
-
-#%% Plot Correlation and Pair Plot 
-
-# Pair Plot
-def pair_plot(input_df):
-    plt.figure(figsize=(10,8), dpi= 80)
-    sns.pairplot(input_df, kind="reg", hue="target")
-    plt.show()
-
-def plot_correlation_map(input_df):
-    # Create correlation heatmap of important features and target
-    sns.set(style="white")
+            largest_difference = delta
+            
+        difference_array = [positive_series_norm.loc[largest_difference.index], negative_series_norm.loc[largest_difference.index]]
+        categorical_bar_chart(largest_difference.index, difference_array, feature)
     
-    # Compute the correlation matrix
-    corr = input_df.corr()
+        plt.show()
     
-    # Generate a mask for the upper triangle
-    mask = np.zeros_like(corr, dtype=np.bool)
-    mask[np.triu_indices_from(mask)] = True
-    
-    # Set up the matplotlib figure
-    f, ax = plt.subplots(figsize=(11, 7))
-    
-    # Generate a custom diverging colormap
-    cmap = sns.diverging_palette(240, 10, as_cmap=True)
-    
-    # Draw the heatmap with the mask and correct aspect ratio
-    sns.heatmap(corr, mask=mask, cmap=cmap, center=0,
-                square=False, linewidths=.5, annot=True, fmt=".2f", cbar=False, yticklabels = True, xticklabels = False);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-input_df = pd.read_csv('data/train.csv')
-target_name = 'SalePrice'
-split_ratios = {'train' : 0.60,
-                'validation' : 0.20,
-                'test' : 0.20}
-
-DF = data.ModelData(input_df, target_name, split_ratios)
-
-sc = data.StandardScaler()
-me = data.MeanEncoder()
-bin = data.BinEncoder()
+    return True
 
 #%%
 
-me.fit(DF.X_train.MSZoning, DF.y_train)
-me.fit(DF.X_train.SaleType, DF.y_train)
-
-me.model_parameters
-
-a = mean_encode_column(DF.X_train.MSZoning, DF.y_train)
-
-b = me.transform(DF.X_train.MSZoning)
-
-bin.fit(DF.X_train.Id)
-
-bin.transform(DF.X_train.Id)
-
-#%%
-
-
-si = SimpleImputer()
-
-[si.fit(DF.X_train[col], 'mode') for col in DF.X_train.columns]
-
-for col in DF.X_train.columns:
-    DF.X_train.loc[:, col] = si.transform(DF.X_train[col])
-
-#%%
-df = DF.X_train
-prop_column_null(df)[:20]
-
-input_series = DF.X_train.LotFrontage
-
-input_series.mean()
-
-si = SimpleImputer()
-
-si.fit(DF.X_train.LotFrontage, 'mode')
-
-si.transform(DF.X_train.LotFrontage)
+def get_qq_plot(input_series, comparison_distribution='normal'):
+    valid_comparison_distributions = ['normal', 'uniform', 'exponential']
+    if comparison_distribution == 'normal':
+        sm.qqplot(input_series, norm, fit=True, line="45")
+        
+    elif comparison_distribution == 'uniform':
+        sm.qqplot(input_series, uniform, line="45")
+    
+    elif comparison_distribution == 'exponential':
+        sm.qqplot(input_series, expon, line="45")
+        
+    else:
+        print("Please select one of: {} as comparison distribution".format(
+            valid_comparison_distributions))
 
 
-balance_data(DF.X_train.select_dtypes(exclude=['object']), DF.y_train, 0.25, 'random_oversampling')
+def is_IQR_outlier(input_series):
+    assert input_series.dtype != 'O', "Cannot use inter-quartile range for strings"
+    q75, q25 = np.percentile(input_series, [75, 25])
+    iqr = q75 - q25
+    lower_bound = q25 - (1.5 * iqr)
+    upper_bound = q75 + (1.5 * iqr)
+    
+    return (input_series > upper_bound) | (input_series < lower_bound)
+
+def get_IQR_outliers(input_X_train, n_threshold=2):
+    results = {}
+    IQR_outliers = input_X_train.apply(is_IQR_outlier, axis=0)
+    results['n_outliers_by_col'] = IQR_outliers.sum(axis=0).sort_values(ascending=False)
+    results['n_outliers_by_row'] = IQR_outliers.sum(axis=1)
+    results['outlier_rows'] = input_X_train.loc[n_outliers_by_row > n_threshold]
+    results['outlier_proportion'] = np.around(len(results['outlier_rows']) / len(input_X_train), 2)
+    return results
+
+def get_isolation_forest_outliers(input_X_train, est_outlier_prop='auto'):
+    results = {}
+    clf = IsolationForest(
+        contamination=est_outlier_prop, random_state=34).fit(input_X_train)
+    isol_forest_outliers = clf.predict(input_X_train)
+    results['outlier_rows'] = input_X_train.loc[isol_forest_outliers == -1]
+    results['outlier_proportion'] = np.around(len(results['outlier_rows']) / len(input_X_train), 2)
+    return results
+
+def get_local_outlier_factor_outliers(input_X_train, n_neighbors=20, est_outlier_prop='auto'):
+    results = {}
+    lof_outliers = LocalOutlierFactor(
+        n_neighbors=n_neighbors, 
+        contamination=est_outlier_prop).fit_predict(input_X_train)
+    results['outlier_rows'] = input_X_train.loc[lof_outliers == -1]
+    results['outlier_proportion'] = np.around(len(results['outlier_rows']) / len(input_X_train), 2)
+    return results
 
 
-#%% Visualize categorical features
+
+
+
+
+
+
+
 
 
 

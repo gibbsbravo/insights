@@ -203,7 +203,8 @@ class SimpleImputer():
 #%% Handle imbalanced datasets
 
 def balance_data(input_X_train, input_y_train, target_ratio, approach='SMOTE'):
-    assert approach in ['random_undersampling', 'random_oversampling', 'SMOTE']
+    valid_approaches = ['random_undersampling', 'random_oversampling', 'SMOTE']
+    assert approach in valid_approaches
     
     if approach == 'random_undersampling':
         n_positive = np.sum(input_y_train)
@@ -224,6 +225,9 @@ def balance_data(input_X_train, input_y_train, target_ratio, approach='SMOTE'):
         n_negative = np.sum(input_y_train == 0)
         n_positive = int((n_negative / (1 - target_ratio)) - n_negative)
         model = SMOTE(random_state=42, sampling_strategy = {0 : n_negative, 1 : n_positive})
+    
+    else:
+        print("Please select one of: {} as balancing approach".format(valid_approaches))
     
     X_resampled, y_resampled = model.fit_resample(input_X_train, input_y_train)
 
