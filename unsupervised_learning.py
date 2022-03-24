@@ -61,7 +61,7 @@ class ClusteringModels():
     - Is still meant for ratio variables after standardization"""}
         self.model_description = model_descriptions[model_name]
     
-    def fit(self, input_df, n_clusters, categorical_cols=[]):
+    def fit(self, input_df, n_clusters):
         if self.model_name == 'Kmeans':
             model = KMeans(n_clusters=n_clusters, random_state=34)
             model.fit(input_df)
@@ -71,7 +71,7 @@ class ClusteringModels():
             model.fit(input_df)
         
         elif self.model_name == 'Kprototypes':
-            categorical_cols_position = [input_df.columns.get_loc(col) for col in categorical_cols]
+            categorical_cols_position = [input_df.columns.get_loc(col) for col in input_df.select_dtypes('O')]
             model = KPrototypes(n_clusters=n_clusters, init='Huang', random_state=34)
             model.fit(input_df, categorical=categorical_cols_position)
                         
@@ -98,9 +98,9 @@ class ClusteringModels():
         self.n_clusters = n_clusters
         self.model = model
         
-    def predict(self, input_df, categorical_cols=[]):
+    def predict(self, input_df):
         if self.model_name == 'Kprototypes':
-            categorical_cols_position = [input_df.columns.get_loc(col) for col in categorical_cols]
+            categorical_cols_position = [input_df.columns.get_loc(col) for col in input_df.select_dtypes('O')]
             return self.model.predict(input_df, categorical=categorical_cols_position)
         
         elif self.model_name == 'hierarchical':
@@ -117,30 +117,40 @@ class ClusteringModels():
 #%%
 
 def elbow_approach(input_X_train, model, max_clusters=10):
+    valid_models = ['Kmeans', 'Kmodes', 'Kprototypes', 'GMM']
     error = []
     
-    for n_clusters in np.arange(1, max_clusters+1):
+    for n_clusters in np.arange(1, max_clusters + 1):
         if model.model_name =='Kmeans':
             kmeans_model = ClusteringModels(model.model_name)
             kmeans_model.fit(input_X_train, n_clusters=n_clusters)
             error.append([n_clusters, kmeans_model.model.inertia_])
             
+        elif model.model_name =='Kmodes':
+            kmodes_model = ClusteringModels(model.model_name)
+            kmodes_model.fit(input_X_train, n_clusters=n_clusters)
+            error.append([n_clusters, kmodes_model.model.cost_])
+        
+        elif model.model_name =='Kprototypes':
+            kprototypes_model = ClusteringModels(model.model_name)
+            kprototypes_model.fit(
+                input_X_train,
+                n_clusters=n_clusters)
+            error.append([n_clusters, kprototypes_model.model.cost_])  
+            
         elif model.model_name =='GMM':
             gmm_model = ClusteringModels(model.model_name)
             gmm_model.fit(input_X_train, n_clusters=n_clusters)
             error.append([n_clusters, gmm_model.model.bic(input_X_train)])
-            
+        
         else:
-            print('Please select either kmeans or GMM')
+            raise Exception("Please select one of: {} as a model".format(valid_models))
             
     error = np.array(error)
     plt.xticks(np.arange(1, max_clusters+1))
     plt.xlabel("Number of Clusters")
     plt.plot(error[:,0], error[:,1])
     plt.show()
-
-m = ClusteringModels('GMM')
-elbow_approach(input_X_train, m, max_clusters=10)
 
 def plot_dendrogram(input_df, depth=3):
     model = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(input_df)
@@ -169,13 +179,43 @@ def plot_dendrogram(input_df, depth=3):
 
 #%%
 
-
 class DimensionalityReduction():
     def __init__(self, model_name):
         self.valid_models = ['PCA', 'MCA', 'LDA']
         assert model_name in self.valid_models, "Please select one of: {} as a model".format(self.valid_models)
         
         self.model_name = model_name
+        self.model = []
+        self.model_information = {}
+
+    def fit(self, input_df):
+        
+
+
+
+
+# si = data.SimpleImputer()
+# DF.X_test = si.fit_transform_df(DF.X_test, 'mode')
+# a = DF.X_test.select_dtypes('O').copy()
+
+m = ClusteringModels('Kprototypes')
+
+elbow_approach(
+    pd.concat([DF.X_test.select_dtypes(exclude=['O']), DF.X_test[['MSZoning', 'SaleCondition']]], axis=1),
+    m)
+
+m.model.inertia_
+
+#%%
+
+
+elbow_approach(input_X_train, m, max_clusters=10)
+
+
+#%%
+
+
+
 
 
 #%%
@@ -237,19 +277,15 @@ def kmodes(X_train_input, X_test_input, n_clusters):
 
 
 
-lda = LatentDirichletAllocation(n_components=n_components, random_state=34,learning_method='batch')
-            lda.fit(X_train_input) 
-            X_train_output = pd.DataFrame(lda.transform(X_train_input),columns = 
-                                          [output_name+'_LDA'+str(p+1) for p in range(n_components)],
-                                          index=X_train_input.index)
-            X_test_output = pd.DataFrame(lda.transform(X_test_input),columns = 
-                                         [output_name+'_LDA'+str(p+1) for p in range(n_components)],
-                                         index=X_test_input.index)
-            return X_train_output, X_test_output
-
-def get_kmeans():
-    
-
+# lda = LatentDirichletAllocation(n_components=n_components, random_state=34,learning_method='batch')
+#             lda.fit(X_train_input) 
+#             X_train_output = pd.DataFrame(lda.transform(X_train_input),columns = 
+#                                           [output_name+'_LDA'+str(p+1) for p in range(n_components)],
+#                                           index=X_train_input.index)
+#             X_test_output = pd.DataFrame(lda.transform(X_test_input),columns = 
+#                                          [output_name+'_LDA'+str(p+1) for p in range(n_components)],
+#                                          index=X_test_input.index)
+#             return X_train_output, X_test_output
 
 
 
