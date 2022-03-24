@@ -3,15 +3,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import os
-
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering
 from scipy.cluster.hierarchy import dendrogram
 from kmodes.kmodes import KModes
 from kmodes.kprototypes import KPrototypes
+from sklearn.manifold import TSNE
 from sklearn.metrics import pairwise_distances_argmin_min
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, LatentDirichletAllocation, NMF
 
 # %matplotlib inline
 
@@ -181,17 +180,57 @@ def plot_dendrogram(input_df, depth=3):
 
 class DimensionalityReduction():
     def __init__(self, model_name):
-        self.valid_models = ['PCA', 'MCA', 'LDA']
+        self.valid_models = ['PCA', 'TSNE', 'LDA', 'NMF']
         assert model_name in self.valid_models, "Please select one of: {} as a model".format(self.valid_models)
         
         self.model_name = model_name
+        self.n_components = None
         self.model = []
         self.model_information = {}
 
-    def fit(self, input_df):
+    def fit(self, input_df, n_components):
+        if self.model_name == 'PCA':
+            model = PCA(n_components=n_components, random_state=34)
+            model.fit(input_df)
+            self.model_information['explained_variance'] = np.around(model.explained_variance_ratio_, 2)
+            self.model_information['total_explained_variance'] = model.explained_variance_ratio_.sum().round(2)
         
+        elif self.model_name == 'TSNE':
+            model = TSNE(
+                n_components=2, 
+                learning_rate='auto',
+                init='random',
+                random_state=34)
+            model.fit(input_df)
+            
+        self.n_components = n_components
+        self.model = model
+
+    def transform(self, input_df):
+        if self.model_name == 'TSNE':
+            assert len(input_df) == len(self.model.embedding_), "T-SNE is non-parametric and only returns embeddings for values it was trained on"
+            return pd.DataFrame(
+                self.model.embedding_,
+                columns = [self.model_name+str(p+1) for p in range(self.n_components)],
+                index=input_df.index)
+        else:
+            return pd.DataFrame(
+                self.model.transform(input_df),
+                columns = [self.model_name+str(p+1) for p in range(self.n_components)],
+                index=input_df.index)
+        
+        
+#%%
+
+pca = DimensionalityReduction('TSNE')
+
+pca.fit(DF.X_train, 2)
+a = pca.transform(DF.X_train)
+
+pca.model_information
 
 
+#%%
 
 
 # si = data.SimpleImputer()
