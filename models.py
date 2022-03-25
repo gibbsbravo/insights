@@ -14,7 +14,6 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 
 import data
 import exploratory_data_analysis as eda
-import unsupervised_learning
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
