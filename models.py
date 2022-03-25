@@ -35,8 +35,8 @@ DF = data.ModelData(input_df, target_name, split_ratios)
 DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
 DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
 
-DF.y_train = np.where(DF.y_train>200000, 1, 0)
-DF.y_val = np.where(DF.y_val>200000, 1, 0)
+DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
+DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
 
 #Fill null values
 si = data.SimpleImputer()
@@ -44,23 +44,109 @@ si = data.SimpleImputer()
 DF.X_train = si.fit_transform_df(DF.X_train, strategy='mean')
 DF.X_val = si.fit_transform_df(DF.X_val, strategy='mean')
 
+# Remove Outliers
+outliers = eda.get_isolation_forest_outliers(DF.X_train)
+
+DF.X_train.drop(outliers['outlier_rows'].index,inplace=True)
+DF.y_train.drop(outliers['outlier_rows'].index,inplace=True)
+DF.X_train.reset_index(inplace=True, drop=True)
+DF.y_train.reset_index(inplace=True, drop=True)
+
 # Scale inputs
 sc = data.StandardScaler()
 
 DF.X_train = sc.fit_transform_df(DF.X_train)
 DF.X_val = sc.fit_transform_df(DF.X_val)
 
-# Remove Outliers
-outliers = eda.get_isolation_forest_outliers(DF.X_train)
-
-DF.X_train.drop(outliers['outlier_rows'].index,inplace=True)
-DF.X_train.reset_index(inplace=True, drop=True)
-
-#%% Classification Models
+# Classification Models
 
 #%% Naive Model
+
+class ClassificationModels():
+    def __init__(self, model_name, hyperparameters={}):
+        self.model_name = model_name
+        self.model = []
+        self.feature_importances = {}
+        self.hyperparameters = hyperparameters
+        
+    def gridsearch(self, input_X_train, input_y_train, gs_hyperparameters):
+        if self.model_name == 'LGBM':
+            model = lgb.LGBMClassifier(objective='binary', random_state=34)
+            clf = GridSearchCV(model, gs_hyperparameters).fit(
+                input_X_train, input_y_train)
+            
+        elif self.model_name == 'Logistic Regression':
+            model = LogisticRegression(random_state=34)
+            clf = GridSearchCV(model, gs_hyperparameters).fit(
+                    input_X_train, input_y_train)
+        
+        elif self.model_name == 'Random Forest':
+            model = RandomForestClassifier(random_state=34)
+            clf = GridSearchCV(model, gs_hyperparameters).fit(
+                    input_X_train, input_y_train)
+        
+        print ("Best Parameters:", clf.best_params_)
+        for param in gs_hyperparameters:
+            self.hyperparameters[param] = clf.best_params_[param]
+            
+        
+    def fit(self, input_X_train, input_y_train):
+        if self.model_name == 'majority':
+            model = int(input_y_train.mean())
+        
+        elif self.model_name == 'LGBM':
+            model = lgb.LGBMClassifier(
+                num_leaves=self.hyperparameters['num_leaves'], 
+                n_estimators=self.hyperparameters['n_estimators'],
+                objective='binary',
+                random_state=34)
+            model.fit(input_X_train, input_y_train)
+        
+        elif self.model_name == 'Logistic Regression':
+            model = LogisticRegression(
+                C=self.hyperparameters['C'],
+                random_state=34)
+            model.fit(input_X_train, input_y_train)
+        
+        elif self.model_name == 'Random Forest':
+            model = RandomForestClassifier(
+                n_estimators=200, 
+                max_depth=self.hyperparameters['max_depth'],
+                max_features='sqrt',
+                n_jobs=4, 
+                random_state=34)
+            model.fit(input_X_train, input_y_train)
+            
+        self.model = model
+            
+            
+    def predict(self, input_X_test):
+        if self.model_name == 'majority':
+            return np.full(shape=(len(input_X_test)), fill_value=self.model)
+        else:
+            return self.model.predict(input_X_test)
+    
+#%%
+
+# classifier = ClassificationModels('LGBM', hyperparameters={'num_leaves' : 10, 'n_estimators': 100})
+# classifier.gridsearch(DF.X_train, DF.y_train, {'num_leaves':[5, 15, 30, 60, 90]})
+
+# classifier = ClassificationModels('Logistic Regression', hyperparameters={'C' : 1})
+# classifier.gridsearch(DF.X_train, DF.y_train, {'C':[0.01,0.1,1,10,100]})
+
+
+classifier = ClassificationModels('Random Forest', hyperparameters={'max_depth' : 1})
+classifier.gridsearch(DF.X_train, DF.y_train, {'max_depth':[1, 2, 8, 10, 20]})
+
+classifier.fit(DF.X_train, DF.y_train)
+
+a = classifier.predict(DF.X_train)
+
+#%%
+
+
 def majority_class(y_train_input, y_test_input):
-    majority_class = int(y_train_input.mean()) 
+    
     naive_train_preds = [majority_class] * len(y_train_input)
     naive_test_preds = [majority_class] * len(y_test_input)
     
