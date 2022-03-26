@@ -1,84 +1,33 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 import lightgbm as lgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.model_selection import GridSearchCV
-from sklearn.model_selection import cross_val_score
 from sklearn.metrics import roc_auc_score
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_curve
+from sklearn.metrics import precision_score, recall_score, roc_curve
+from sklearn.neighbors import KNeighborsClassifier
 
-import data
-import exploratory_data_analysis as eda
+# %matplotlib inline
 
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning) 
-
-#%% Load standardized data
-input_df = pd.read_csv('data/train.csv')
-input_df.drop(['PoolArea', 'PoolQC', '3SsnPorch', 'Alley', 'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'], axis=1, inplace=True)
-
-target_name = 'SalePrice'
-split_ratios = {'train' : 0.60,
-                'validation' : 0.20,
-                'test' : 0.20}
-
-
-DF = data.ModelData(input_df, target_name, split_ratios)
-
-
-# Remove strings
-DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
-DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
-
-DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
-DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
-
-#Fill null values
-si = data.SimpleImputer()
-
-DF.X_train = si.fit_transform_df(DF.X_train, strategy='mean')
-DF.X_val = si.fit_transform_df(DF.X_val, strategy='mean')
-
-# Remove Outliers
-outliers = eda.get_isolation_forest_outliers(DF.X_train)
-
-DF.X_train.drop(outliers['outlier_rows'].index,inplace=True)
-DF.y_train.drop(outliers['outlier_rows'].index,inplace=True)
-DF.X_train.reset_index(inplace=True, drop=True)
-DF.y_train.reset_index(inplace=True, drop=True)
-
-# Scale inputs
-sc = data.StandardScaler()
-
-DF.X_train = sc.fit_transform_df(DF.X_train)
-DF.X_val = sc.fit_transform_df(DF.X_val)
-
-# Classification Models
-
-#%% Naive Model
+#%% Classification Models
 
 class ClassificationModels():
-    def __init__(self, model_name, hyperparameters={}):
+    def __init__(self, model_name, hyperparameters={}, is_multiclass=False):
         self.model_name = model_name
+        self.hyperparameters = hyperparameters
+        self.is_multiclass = is_multiclass
         self.model = []
         self.feature_importance = pd.DataFrame([])
-        self.hyperparameters = hyperparameters
     
-    def format_feature_importance_df(self, input_X_train, feature_importance):
-        model_feature_importance = pd.DataFrame(feature_importance, 
-                                  columns=["importance"],
-                                  index = input_X_train.columns)
-        model_feature_importance.sort_values(by='importance', ascending=False, inplace=True)
-        return model_feature_importance
-    
-    def gridsearch(self, input_X_train, input_y_train, gs_hyperparameters):
+    def gridsearch_hyperparameters(self, input_X_train, input_y_train, gs_hyperparameters):
         if self.model_name == 'LGBM':
-            model = lgb.LGBMClassifier(objective='binary', random_state=34)
+            model = lgb.LGBMClassifier(
+                objective='multiclass' if self.is_multiclass else 'binary',
+                random_state=34)
             clf = GridSearchCV(model, gs_hyperparameters).fit(
                 input_X_train, input_y_train)
             
@@ -97,20 +46,24 @@ class ClassificationModels():
             clf = GridSearchCV(model, gs_hyperparameters).fit(
                     input_X_train, input_y_train)
         
+        elif self.model_name == 'KNN':
+            model = KNeighborsClassifier()
+            clf = GridSearchCV(model, gs_hyperparameters).fit(
+                    input_X_train, input_y_train)
+        
         print ("Best Parameters:", clf.best_params_)
         for param in gs_hyperparameters:
             self.hyperparameters[param] = clf.best_params_[param]
-            
         
     def fit(self, input_X_train, input_y_train):
         if self.model_name == 'majority':
-            model = int(input_y_train.mean())
+            model = input_y_train.mode().item()
         
         elif self.model_name == 'LGBM':
             model = lgb.LGBMClassifier(
                 num_leaves=self.hyperparameters['num_leaves'], 
                 n_estimators=self.hyperparameters['n_estimators'],
-                objective='binary',
+                objective='multiclass' if self.is_multiclass else 'binary',
                 random_state=34)
             model.fit(input_X_train, input_y_train)
             
@@ -124,7 +77,7 @@ class ClassificationModels():
             model.fit(input_X_train, input_y_train)
             
             self.feature_importance = self.format_feature_importance_df(
-                input_X_train, np.abs(model.coef_).flatten())
+                input_X_train, np.max(np.abs(model.coef_), axis=0).flatten())
         
         elif self.model_name == 'Random Forest':
             model = RandomForestClassifier(
@@ -144,6 +97,11 @@ class ClassificationModels():
                 kernel=self.hyperparameters['kernel'],
                 random_state=34)
             model.fit(input_X_train, input_y_train)
+                    
+        elif self.model_name == 'KNN':
+            model = KNeighborsClassifier(
+                n_neighbors=self.hyperparameters['n_neighbors'])
+            model.fit(input_X_train, input_y_train)
             
         self.model = model
             
@@ -156,95 +114,115 @@ class ClassificationModels():
             return self.model.predict(input_X_test)
         
         else:
-            return self.model.predict_proba(input_X_test)[:, 1]
+            class_pred_probabilies = self.model.predict_proba(input_X_test)
+            return np.argmax(class_pred_probabilies, axis=1), class_pred_probabilies
+        
+    def format_feature_importance_df(self, input_X_train, feature_importance):
+        model_feature_importance = pd.DataFrame(feature_importance, 
+                                  columns=["importance"],
+                                  index = input_X_train.columns)
+        model_feature_importance.sort_values(by='importance', ascending=False, inplace=True)
+        return model_feature_importance
+    
+    def plot_feature_importance(self, max_features=10):
+        if len(self.feature_importance) == 0:
+            print("Need to fit model first")
+        else:
+            plt.bar(
+                self.feature_importance.index[:max_features],
+                self.feature_importance['importance'][:max_features])
+            plt.title('Feature Importance')
+            plt.xlabel('Features')
+            plt.xticks(rotation=45, ha='right')
+            plt.show()
     
 #%% Model evaluation
-def get_model_accuracy(model_preds, y_values):
-    return np.around((np.around(model_preds) == y_values).sum() / len(y_values), 4)
+def get_model_accuracy(model_preds, y_true):
+    return np.around((model_preds == y_true).sum() / len(y_true), 4)
 
-def get_model_AUC(model_preds, y_values):
-    return np.around(roc_auc_score(y_values, model_preds), 4)
+def get_model_AUC(model_pred_probs, y_true):
+    if len(set(y_true)) > 2:
+        return np.around(
+            roc_auc_score(
+                y_true, 
+                model_pred_probs,
+                multi_class='ovr',
+                average='weighted'
+                )
+            , 4)
+    else:
+        return np.around(roc_auc_score(y_true, model_pred_probs[:, 1]), 4)
 
-def get_model_precision(model_preds, y_values):
-    return np.around(precision_score(y_values, np.around(model_preds)), 4)
+def get_model_precision(model_preds, y_true):
+    if len(set(y_true)) > 2:
+        return np.around(
+            precision_score(
+                y_true, 
+                model_preds,
+                average='weighted'
+                )
+            , 4)
+    else:
+        return np.around(precision_score(y_true, model_preds), 4)
+    
 
-def get_model_recall(model_preds, y_values):
-    return np.around(recall_score(y_values, np.around(model_preds)), 4)
+def get_model_recall(model_preds, y_true):
+    if len(set(y_true)) > 2:
+        return np.around(
+            recall_score(
+                y_true, 
+                model_preds,
+                average='weighted'
+                )
+            , 4)
+    else:
+        return np.around(recall_score(y_true, model_preds), 4)
 
-def get_model_f_score(model_preds, y_values, beta=1):
-    precision = get_model_precision(model_preds, y_values)
-    recall = get_model_recall(model_preds, y_values)
+def get_model_f_score(model_preds, y_true, beta=1):
+    precision = get_model_precision(model_preds, y_true)
+    recall = get_model_recall(model_preds, y_true)
     return np.around((1 + beta) * ((precision * recall) / ((beta * precision) + recall)), 4)
 
-def get_confusion_matrix(model_preds, y_values):
+def get_confusion_matrix(model_preds, y_true):
     return pd.crosstab(
-        y_values,
+        y_true,
         np.around(model_preds),
         rownames=['True'],
         colnames=['Predicted'],
         margins=True)
 
-def evaluate_model(model_preds, y_values, beta=1):
+def evaluate_model(model_preds, model_pred_probs, y_true, beta=1):
     results = {}
-    results['accuracy'] = get_model_accuracy(model_preds, y_values)
-    results['AUC'] = get_model_AUC(model_preds, y_values)
-    results['precision'] = get_model_precision(model_preds, y_values)
-    results['recall'] = get_model_recall(model_preds, y_values)
+    results['accuracy'] = get_model_accuracy(model_preds, y_true)
+    results['AUC'] = get_model_AUC(model_pred_probs, y_true)
+    results['precision'] = get_model_precision(model_preds, y_true)
+    results['recall'] = get_model_recall(model_preds, y_true)
     results['f-score'] = {'beta': beta,
-                          'score':get_model_f_score(model_preds, y_values, beta=beta)}
-    results['confusion_matrix'] = get_confusion_matrix(model_preds, y_values)
+                          'score':get_model_f_score(model_preds, y_true, beta=beta)}
+    results['confusion_matrix'] = get_confusion_matrix(model_preds, y_true)
     
     return results
 
-# # Print Accuracy
-# print('Model Results on Test Set:')
-# print('    - Majority Classifier: {:.2f}%'.format(naive_test_accuracy*100))
-# print('    - Random Forest: {:.2f}%'.format(rf_test_accuracy*100))
-# print('    - Logistic Regression: {:.2f}%'.format(logr_test_accuracy*100))
-# print('    - LightGBM : {:.2f}%'.format(lgbm_test_accuracy*100))
-
-# # Plot Feature Importance 
-# plt.bar(rf_feature_importance.index, rf_feature_importance['importance'])
-# plt.title('Feature Importance')
-# plt.xlabel('Features')
-# plt.yticks([])
-# plt.show()
-
-# #%%  # Examine ROC curve for both models
-# lgbm_fpr, lgbm_tpr, _ = roc_curve(y_test, lgbm_pred_probs[:,1])
-# logr_fpr, logr_tpr, _ = roc_curve(y_test, logr_pred_probs[:,1])
-# rf_fpr, rf_tpr, _ = roc_curve(y_test, rf_pred_probs[:,1])
-
-# plt.figure(figsize=(8, 6))
-# plt.title('Receiver Operating Characteristic Curves')
-# plt.plot(lgbm_fpr, lgbm_tpr, 'b', label = 'LGBM AUC = %0.4f' % lgbm_AUC)
-# plt.plot(logr_fpr, logr_tpr, 'r', label = 'Logistic Regression AUC = %0.4f' % logr_AUC)
-# plt.plot(rf_fpr, rf_tpr, 'g', label = 'Random Forest AUC = %0.4f' % rf_AUC)
-# plt.legend(loc = 'lower right')
-# plt.xlim([0, 1])
-# plt.ylim([0, 1])
-# plt.ylabel('True Positive Rate')
-# plt.xlabel('False Positive Rate')
-# plt.show()
-
-
-#%%
-
-classifier = ClassificationModels('LGBM', hyperparameters={'num_leaves' : 10, 'n_estimators': 100})
-classifier.gridsearch(DF.X_train, DF.y_train, {'num_leaves':[5, 15, 30, 60, 90]})
-
-classifier = ClassificationModels('Logistic Regression', hyperparameters={'C' : 1, 'penalty' : 'l2'})
-classifier.gridsearch(DF.X_train, DF.y_train, {'C':[0.01,0.1,1,10,100]})
-
-classifier = ClassificationModels('Random Forest', hyperparameters={'max_depth' : 1})
-classifier.gridsearch(DF.X_train, DF.y_train, {'max_depth':[1, 2, 8, 10, 20]})
-
-classifier = ClassificationModels('SVM', hyperparameters={'C' : 1})
-classifier.gridsearch(DF.X_train, DF.y_train, {'C':[0.01,0.1,10,], 'kernel':['linear', 'poly', 'rbf']})
-
-classifier.fit(DF.X_train, DF.y_train)
-
-model_preds = classifier.predict(DF.X_val)
-
-evaluate_model(model_preds, DF.y_val)
+def get_roc_curve(model_pred_probs, y_true, plot_results=True):
+    assert len(set(y_true)) == 2, "ROC implementation only applies to binary classification"
     
+    results = {}
+    results['false_positive_rate'], results['true_positive_rate'], _ = roc_curve(
+        y_true, model_pred_probs[:, 1])
+
+    if plot_results:
+        plt.figure(figsize=(8, 6))
+        plt.title('Receiver Operating Characteristic Curve')
+        plt.plot(
+            results['false_positive_rate'], 
+            results['true_positive_rate'],
+            'b',
+            label='AUC: {:.4f}'.format(
+                get_model_AUC(model_pred_probs, y_true)))
+        plt.legend(loc = 'lower right')
+        plt.xlim([0, 1])
+        plt.ylim([0, 1])
+        plt.ylabel('True Positive Rate')
+        plt.xlabel('False Positive Rate')
+        plt.show()
+
