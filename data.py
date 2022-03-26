@@ -279,15 +279,18 @@ class StandardScaler():
 class MeanEncoder():
     def __init__(self):
         self.model_parameters = {}
+        # When the value is not in the training set then can use the target mean
+        self.target_mean = 0
     
     def fit(self, input_series, target_output):
         merged_df = pd.merge(input_series, target_output, how='left', left_index=True, right_index=True)
         mean_target_value = merged_df.groupby(input_series.name).mean()
         self.model_parameters[input_series.name] = mean_target_value[target_output.name].to_dict()
+        self.target_mean = np.mean(target_output)
         return self.model_parameters[input_series.name]
         
     def transform(self, input_series):
-        return input_series.map(self.model_parameters[input_series.name])
+        return input_series.map(self.model_parameters[input_series.name]).fillna(self.target_mean)
     
     def fit_df(self, input_df, target_output):
         for col in input_df:
@@ -345,7 +348,7 @@ class BinEncoder():
 
 def one_hot_encode_column(input_series):
     one_hot_df = pd.get_dummies(input_series)
-    one_hot_df.columns = [input_series.name+': '+x for x in one_hot_df.columns]
+    one_hot_df.columns = [input_series.name+': '+str(x) for x in one_hot_df.columns]
     
     return one_hot_df
 

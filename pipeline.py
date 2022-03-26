@@ -57,8 +57,6 @@ eda.create_html_data_profile(
     'outputs/data_profile.html', 
     overwrite=False)
 
-
-
 #%% Data cleaning
 
 # Check whether there are duplicates and remove
@@ -75,15 +73,13 @@ if n_duplicated_rows > 0:
 si = data.SimpleImputer()
 
 DF.X_train = si.fit_transform_df(DF.X_train, strategy='mode')
-DF.X_val = si.fit_transform_df(DF.X_val, strategy='mode')
+DF.X_val = si.transform_df(DF.X_val)
 
 # Categorical / mean encode variables
-
 categorical_encodings_dict = {col : {'encoding' : 'mean', 'model' : None} 
                               for col in DF.X_train.select_dtypes('object').columns}
 
 categorical_encodings_dict = data.fit_cat_encoding(DF.X_train, DF.y_train, categorical_encodings_dict)
-
 DF.X_train = data.transform_cat_encoding(DF.X_train, categorical_encodings_dict)
 DF.X_val = data.transform_cat_encoding(DF.X_val, categorical_encodings_dict)
 
@@ -100,21 +96,60 @@ DF.y_train.reset_index(inplace=True, drop=True)
 
 # Scale inputs
 sc = data.StandardScaler()
-
+    
 DF.X_train = sc.fit_transform_df(DF.X_train)
-DF.X_val = sc.fit_transform_df(DF.X_val)
+DF.X_val = sc.transform_df(DF.X_val)
 
 #%% Feature Engineering
 
 # Feature importance
+feat_importance_model = m.ClassificationModels('Random Forest',
+                       hyperparameters={'max_depth':10})
+feat_importance_model.fit(DF.X_train, DF.y_train)
+feat_importance_model.plot_feature_importance()
 
 
 #%% Clustering & dimensionality reduction
 
+# Figure out how many clusters to create
+ul.plot_elbow_approach(DF.X_train, 'Kmeans')
+ul.plot_dendrogram(DF.X_train, 5)
+
+# Train cluster model
+kmeans_model = ul.ClusteringModels('Kmeans')
+kmeans_model.fit(DF.X_train, n_clusters=3)
+
+DF.X_train['Kmeans_cluster'] = kmeans_model.predict(DF.X_train)
+DF.X_val['Kmeans_cluster'] = kmeans_model.predict(DF.X_val)
+
+# Visualize the clusters
+pca_model = ul.DimensionalityReduction('PCA')
+
+pca_model.fit(DF.X_train.loc[:, DF.X_train.columns != 'Kmeans_cluster'], 2)
+pca_dims = pca_model.transform(DF.X_train.loc[:, DF.X_train.columns != 'Kmeans_cluster'])
+
+ul.plot_components_by_feature(pca_dims, DF.X_train['Kmeans_cluster'])
+ul.plot_components_by_feature(pca_dims, DF.y_train)
+
+# Add the clusters to the data as one-hot encoded
+categorical_encodings_dict['Kmeans_cluster'] = {'encoding' : 'one-hot', 'model' : None} 
+DF.X_train = data.transform_cat_encoding(
+    DF.X_train,
+    {key : value for key, value in categorical_encodings_dict.items() if key == 'Kmeans_cluster'})
+
+DF.X_val = data.transform_cat_encoding(
+    DF.X_val,
+    {key : value for key, value in categorical_encodings_dict.items() if key == 'Kmeans_cluster'})
+
 
 #%% Modelling 
 # fit models 
+
+
 # Get predictions
+
+
+
 # evaluate models
 
 

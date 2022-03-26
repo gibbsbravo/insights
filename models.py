@@ -17,6 +17,10 @@ from sklearn.neighbors import KNeighborsClassifier
 
 class ClassificationModels():
     def __init__(self, model_name, hyperparameters={}, is_multiclass=False):
+        self.valid_models = ['LGBM', 'Logistic Regression', 'Random Forest',
+                             'SVM', 'KNN']
+        assert model_name in self.valid_models, "Please select one of the following models: {}".format(self.valid_models)
+        
         self.model_name = model_name
         self.hyperparameters = hyperparameters
         self.is_multiclass = is_multiclass

@@ -14,6 +14,69 @@ from sklearn.decomposition import PCA, LatentDirichletAllocation, NMF
 
 # %matplotlib inline
 
+#%% Visualize optimal number of clusters
+
+def plot_elbow_approach(input_X_train, model_name, max_clusters=10):
+    valid_models = ['Kmeans', 'Kmodes', 'Kprototypes', 'GMM']
+    error = []
+    
+    for n_clusters in np.arange(1, max_clusters + 1):
+        if model_name =='Kmeans':
+            kmeans_model = ClusteringModels(model_name)
+            kmeans_model.fit(input_X_train, n_clusters=n_clusters)
+            error.append([n_clusters, kmeans_model.model.inertia_])
+            
+        elif model_name =='Kmodes':
+            kmodes_model = ClusteringModels(model_name)
+            kmodes_model.fit(input_X_train, n_clusters=n_clusters)
+            error.append([n_clusters, kmodes_model.model.cost_])
+        
+        elif model_name =='Kprototypes':
+            kprototypes_model = ClusteringModels(model_name)
+            kprototypes_model.fit(
+                input_X_train,
+                n_clusters=n_clusters)
+            error.append([n_clusters, kprototypes_model.model.cost_])  
+            
+        elif model_name =='GMM':
+            gmm_model = ClusteringModels(model_name)
+            gmm_model.fit(input_X_train, n_clusters=n_clusters)
+            error.append([n_clusters, gmm_model.model.bic(input_X_train)])
+        
+        else:
+            raise Exception("Please select one of: {} as a model".format(valid_models))
+            
+    error = np.array(error)
+    plt.xticks(np.arange(1, max_clusters+1))
+    plt.xlabel("Number of Clusters")
+    plt.plot(error[:,0], error[:,1])
+    plt.show()
+
+def plot_dendrogram(input_df, depth=3):
+    model = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(input_df)
+    
+    # create the counts of samples under each node
+    counts = np.zeros(model.children_.shape[0])
+    n_samples = len(model.labels_)
+    for i, merge in enumerate(model.children_):
+        current_count = 0
+        for child_idx in merge:
+            if child_idx < n_samples:
+                current_count += 1  # leaf node
+            else:
+                current_count += counts[child_idx - n_samples]
+        counts[i] = current_count
+
+    linkage_matrix = np.column_stack(
+        [model.children_, model.distances_, counts]
+    ).astype(float)
+
+    # Plot the corresponding dendrogram
+    plt.title("Hierarchical Clustering Dendrogram")
+    dendrogram(linkage_matrix, truncate_mode="level", p=depth)
+    plt.xlabel("Number of points in node (or index of point if no parenthesis).")
+    plt.show()
+
 #%% Clustering Algorithms
 class ClusteringModels():
     def __init__(self, model_name):
@@ -114,69 +177,6 @@ def get_kmeans_centroids(input_df, kmeans_model):
     closest, _ = pairwise_distances_argmin_min(kmeans_model.cluster_centers_, input_df)
     return input_df.iloc[closest]
 
-#%% Visualize optimal number of clusters
-
-def elbow_approach(input_X_train, model, max_clusters=10):
-    valid_models = ['Kmeans', 'Kmodes', 'Kprototypes', 'GMM']
-    error = []
-    
-    for n_clusters in np.arange(1, max_clusters + 1):
-        if model.model_name =='Kmeans':
-            kmeans_model = ClusteringModels(model.model_name)
-            kmeans_model.fit(input_X_train, n_clusters=n_clusters)
-            error.append([n_clusters, kmeans_model.model.inertia_])
-            
-        elif model.model_name =='Kmodes':
-            kmodes_model = ClusteringModels(model.model_name)
-            kmodes_model.fit(input_X_train, n_clusters=n_clusters)
-            error.append([n_clusters, kmodes_model.model.cost_])
-        
-        elif model.model_name =='Kprototypes':
-            kprototypes_model = ClusteringModels(model.model_name)
-            kprototypes_model.fit(
-                input_X_train,
-                n_clusters=n_clusters)
-            error.append([n_clusters, kprototypes_model.model.cost_])  
-            
-        elif model.model_name =='GMM':
-            gmm_model = ClusteringModels(model.model_name)
-            gmm_model.fit(input_X_train, n_clusters=n_clusters)
-            error.append([n_clusters, gmm_model.model.bic(input_X_train)])
-        
-        else:
-            raise Exception("Please select one of: {} as a model".format(valid_models))
-            
-    error = np.array(error)
-    plt.xticks(np.arange(1, max_clusters+1))
-    plt.xlabel("Number of Clusters")
-    plt.plot(error[:,0], error[:,1])
-    plt.show()
-
-def plot_dendrogram(input_df, depth=3):
-    model = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(input_df)
-    
-    # create the counts of samples under each node
-    counts = np.zeros(model.children_.shape[0])
-    n_samples = len(model.labels_)
-    for i, merge in enumerate(model.children_):
-        current_count = 0
-        for child_idx in merge:
-            if child_idx < n_samples:
-                current_count += 1  # leaf node
-            else:
-                current_count += counts[child_idx - n_samples]
-        counts[i] = current_count
-
-    linkage_matrix = np.column_stack(
-        [model.children_, model.distances_, counts]
-    ).astype(float)
-
-    # Plot the corresponding dendrogram
-    plt.title("Hierarchical Clustering Dendrogram")
-    dendrogram(linkage_matrix, truncate_mode="level", p=depth)
-    plt.xlabel("Number of points in node (or index of point if no parenthesis).")
-    plt.show()
-
 #%% Dimensionality reduction
 
 class DimensionalityReduction():
@@ -195,6 +195,7 @@ class DimensionalityReduction():
             model.fit(input_df)
             self.model_information['explained_variance'] = np.around(model.explained_variance_ratio_, 2)
             self.model_information['total_explained_variance'] = model.explained_variance_ratio_.sum().round(2)
+            print(self.model_information)
         
         elif self.model_name == 'TSNE':
             model = TSNE(
