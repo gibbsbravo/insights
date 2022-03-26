@@ -6,30 +6,27 @@ import seaborn as sns
 import os
 import data
 import exploratory_data_analysis as eda
-import unsupervised_learning
-import models
+import unsupervised_learning as ul
+import models as m
 
 # %matplotlib inline
 
-#%%
+#%% Load data & split into sets
 
-input_df = pd.read_csv('data/train.csv')
-input_df.drop(['PoolArea', 'PoolQC', '3SsnPorch', 'Alley', 'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'], axis=1, inplace=True)
+input_df = data.load_file('data/train.csv')
 
+# Remove empty variables
+input_df.drop(
+    ['PoolArea', 'PoolQC', '3SsnPorch', 'Alley', 'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'], axis=1, inplace=True)
+
+# Set target_variable, train, validation, and test sets
 target_name = 'SalePrice'
 split_ratios = {'train' : 0.60,
                 'validation' : 0.20,
                 'test' : 0.20}
-
 is_multiclass = False
 
 DF = data.ModelData(input_df, target_name, split_ratios)
-
-
-# Remove strings
-DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
-DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
-
 
 if is_multiclass:
     # Multiclass cl=assification
@@ -44,14 +41,57 @@ else:
     DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
     DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
 
-#Fill null values
+
+#%% Simple EDA
+
+# Simple profiling
+DF.X_train.info()
+
+# Check for nulls
+eda.prop_column_null(DF.X_train)[:20]
+eda.prop_row_null(DF.X_train)[:20]
+
+# Export summary HTML report of data profile
+eda.create_html_data_profile(
+    DF.X_train, 
+    'outputs/data_profile.html', 
+    overwrite=False)
+
+
+
+#%% Data cleaning
+
+# Check whether there are duplicates and remove
+duplicate_rows = data.get_duplicate_rows(DF.X_train)
+
+n_duplicated_rows = len(set(duplicate_rows.index).intersection(set(DF.X_train.index)))
+
+if n_duplicated_rows > 0:
+    DF.X_train.drop(duplicate_rows.index, axis=0, inplace=True)
+    DF.X_train.reset_index(drop=True, inplace=True)
+    print("Removed {} duplicated rows.".format(n_duplicated_rows))
+
+# Fill null values
 si = data.SimpleImputer()
 
-DF.X_train = si.fit_transform_df(DF.X_train, strategy='mean')
-DF.X_val = si.fit_transform_df(DF.X_val, strategy='mean')
+DF.X_train = si.fit_transform_df(DF.X_train, strategy='mode')
+DF.X_val = si.fit_transform_df(DF.X_val, strategy='mode')
+
+# Categorical / mean encode variables
+
+categorical_encodings_dict = {col : {'encoding' : 'mean', 'model' : None} 
+                              for col in DF.X_train.select_dtypes('object').columns}
+
+categorical_encodings_dict = data.fit_cat_encoding(DF.X_train, DF.y_train, categorical_encodings_dict)
+
+DF.X_train = data.transform_cat_encoding(DF.X_train, categorical_encodings_dict)
+DF.X_val = data.transform_cat_encoding(DF.X_val, categorical_encodings_dict)
 
 # Remove Outliers
 outliers = eda.get_isolation_forest_outliers(DF.X_train)
+print('{} records ({:.2%}) identified as an outlier'.format(
+    len(outliers['outlier_rows']),
+    outliers['outlier_proportion']))
 
 DF.X_train.drop(outliers['outlier_rows'].index,inplace=True)
 DF.y_train.drop(outliers['outlier_rows'].index,inplace=True)
@@ -63,6 +103,45 @@ sc = data.StandardScaler()
 
 DF.X_train = sc.fit_transform_df(DF.X_train)
 DF.X_val = sc.fit_transform_df(DF.X_val)
+
+#%% Feature Engineering
+
+# Feature importance
+
+
+#%% Clustering & dimensionality reduction
+
+
+#%% Modelling 
+# fit models 
+# Get predictions
+# evaluate models
+
+
+# model selection
+
+# Model retraining on full set and export
+
+#%% Save models
+
+
+
+
+
+
+
+
+
+
+# # Remove strings
+# DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
+# DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
+
+
+
+
+
+
 
 
 

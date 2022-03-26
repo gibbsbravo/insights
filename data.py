@@ -137,9 +137,12 @@ class ModelData():
             
 #%% Handle Duplicate Values
 
-def get_duplicate_rows(input_df, column_subset=['Id']):
+def get_duplicate_rows(input_df, column_subset=None):
     """Returns a dataframe containing the duplicated rows"""
-    return input_df.loc[input_df.duplicated(subset=column_subset, keep='first')]
+    if column_subset is None:
+        return input_df.loc[input_df.duplicated(keep='first')]
+    else:
+        return input_df.loc[input_df.duplicated(subset=column_subset, keep='first')]
 
 # Get duplicate rows then remove them from dataframe
 # duplicate_rows = get_duplicate_rows(input_df, column_subset)
@@ -345,7 +348,38 @@ def one_hot_encode_column(input_series):
     one_hot_df.columns = [input_series.name+': '+x for x in one_hot_df.columns]
     
     return one_hot_df
+
+def fit_cat_encoding(input_X_train, input_y_train, categorical_encodings_dict):
+    for col_name in categorical_encodings_dict:
+        if categorical_encodings_dict[col_name]['encoding'] == 'mean':
+            mean_encoder = MeanEncoder()
+            mean_encoder.fit(input_X_train[col_name], input_y_train)
+            categorical_encodings_dict[col_name]['model'] = mean_encoder
+
+    return categorical_encodings_dict
+
+def transform_cat_encoding(input_df, categorical_encodings_dict):
+    output_df = input_df.copy()
     
+    for col_name in categorical_encodings_dict:
+        if categorical_encodings_dict[col_name]['encoding'] == 'mean':
+            mean_encoder = categorical_encodings_dict[col_name]['model']
+            output_df[col_name] = mean_encoder.transform(output_df[col_name])
+
+        elif categorical_encodings_dict[col_name]['encoding'] == 'one-hot':
+            if len(set(output_df[col_name])) == 2:
+                top_value = output_df[col_name].value_counts().index[0]
+                binary_col_name = col_name + " is " + top_value
+                output_df[binary_col_name] = np.where(output_df[col_name] == top_value, 1, 0)
+            
+            else:
+                one_hot_columns = one_hot_encode_column(output_df[col_name])
+                output_df = pd.concat([output_df, one_hot_columns], axis=1)
+            
+            output_df.drop(col_name, axis=1, inplace=True)
+            
+    return output_df
+
 def log_transform_column(input_series):
     assert input_series.dtype != 'O'
     
