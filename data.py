@@ -131,9 +131,15 @@ class ModelData():
         if ('validation' in split_ratios) and (split_ratios['validation'] > 0):
             self.X_val = input_df.loc[val_set, input_df.columns != target_name].reset_index(drop=True)
             self.y_val = input_df.loc[val_set, target_name].reset_index(drop=True)
+            
+            self.X_full_train = pd.concat([self.X_train, self.X_val], axis=0)
+            self.y_full_train = pd.concat([self.y_train, self.y_val], axis=0)
         else:
             self.X_val = None
             self.y_val = None
+            
+            self.X_full_train = self.X_train.copy()
+            self.y_full_train = self.y_train.copy()
             
 #%% Handle Duplicate Values
 
@@ -348,7 +354,7 @@ class BinEncoder():
 
 def one_hot_encode_column(input_series):
     one_hot_df = pd.get_dummies(input_series)
-    one_hot_df.columns = [input_series.name+': '+str(x) for x in one_hot_df.columns]
+    one_hot_df.columns = [input_series.name+str(x) for x in one_hot_df.columns]
     
     return one_hot_df
 

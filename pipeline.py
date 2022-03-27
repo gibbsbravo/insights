@@ -7,7 +7,7 @@ import os
 import data
 import exploratory_data_analysis as eda
 import unsupervised_learning as ul
-import models as m
+import models
 
 # %matplotlib inline
 
@@ -103,7 +103,7 @@ DF.X_val = sc.transform_df(DF.X_val)
 #%% Feature Engineering
 
 # Feature importance
-feat_importance_model = m.ClassificationModels('Random Forest',
+feat_importance_model = models.ClassificationModels('Random Forest',
                        hyperparameters={'max_depth':10})
 feat_importance_model.fit(DF.X_train, DF.y_train)
 feat_importance_model.plot_feature_importance()
@@ -144,37 +144,63 @@ DF.X_val = data.transform_cat_encoding(
 
 #%% Modelling 
 # fit models 
+model_name = 'LGBM'
+gs_hyperparameters = {'num_leaves' : [4, 6, 8, 10, 20, 40]}
 
+model = models.ClassificationModels(model_name)
+model.gridsearch_hyperparameters(
+    DF.X_train, DF.y_train, gs_hyperparameters)
+
+model.fit(DF.X_train, DF.y_train)
 
 # Get predictions
-
-
+y_train_pred, y_train_pred_probs = model.predict(DF.X_train)
+y_val_pred, y_val_pred_probs = model.predict(DF.X_val)
 
 # evaluate models
+train_performance = models.evaluate_model(y_train_pred, y_train_pred_probs, DF.y_train)
+val_performance = models.evaluate_model(y_val_pred, y_val_pred_probs, DF.y_val)
+
+models.plot_roc_curve(y_val_pred_probs, DF.y_val)
+
+false_negative_records = models.get_false_negative_records(
+    DF.X_val, y_val_pred, y_val_pred_probs, DF.y_val)
+false_positive_records = models.get_false_positive_records(
+    DF.X_val, y_val_pred, y_val_pred_probs, DF.y_val)
+
+# Model Explainability
 
 
 # model selection
 
+
 # Model retraining on full set and export
+
+
 
 #%% Save models
 
 
 
 
+#%%
 
+class ModelPipeline():
+    def __init__(self, input_DF_object, pipeline_parameters):
+        self.DF = input_DF_object
+        self.pipeline_parameters = pipeline_parameters
+        
+        self.results = []
+        self.pipeline_graph = []
+        
+    def fit_pipeline(self):
+        return True
+    
+    def predict_pipeline(self):
+        return True
 
-
-
-
-
-# # Remove strings
-# DF.X_train = DF.X_train.select_dtypes(exclude=['object'])
-# DF.X_val = DF.X_val.select_dtypes(exclude=['object'])
-
-
-
-
+    def save_models(self):
+        return True
 
 
 

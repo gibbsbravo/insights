@@ -66,7 +66,7 @@ class ClassificationModels():
         elif self.model_name == 'LGBM':
             model = lgb.LGBMClassifier(
                 num_leaves=self.hyperparameters['num_leaves'], 
-                n_estimators=self.hyperparameters['n_estimators'],
+                n_estimators=200,
                 objective='multiclass' if self.is_multiclass else 'binary',
                 random_state=34)
             model.fit(input_X_train, input_y_train)
@@ -111,15 +111,15 @@ class ClassificationModels():
             
     def predict(self, input_X_test):
         if self.model_name == 'majority':
-            return np.full(shape=(len(input_X_test)), fill_value=self.model)
+            return np.full(shape=(len(input_X_test)), fill_value=self.model), None
         
         if self.model_name == 'SVM':
             """SVMs do not directly provide probability estimates"""
-            return self.model.predict(input_X_test)
+            return self.model.predict(input_X_test), None
         
         else:
             class_pred_probabilies = self.model.predict_proba(input_X_test)
-            return np.argmax(class_pred_probabilies, axis=1), class_pred_probabilies
+            return np.argmax(class_pred_probabilies, axis=1), np.around(class_pred_probabilies, 2)
         
     def format_feature_importance_df(self, input_X_train, feature_importance):
         model_feature_importance = pd.DataFrame(feature_importance, 
@@ -207,7 +207,7 @@ def evaluate_model(model_preds, model_pred_probs, y_true, beta=1):
     
     return results
 
-def get_roc_curve(model_pred_probs, y_true, plot_results=True):
+def plot_roc_curve(model_pred_probs, y_true, plot_results=True):
     assert len(set(y_true)) == 2, "ROC implementation only applies to binary classification"
     
     results = {}
@@ -230,3 +230,10 @@ def get_roc_curve(model_pred_probs, y_true, plot_results=True):
         plt.xlabel('False Positive Rate')
         plt.show()
 
+def get_false_positive_records(input_X_df, model_preds, model_pred_probs, y_true):
+    """Only works for binary classification"""
+    return input_X_df.loc[(model_preds == 1) & (y_true == 0)]
+
+def get_false_negative_records(input_X_df, model_preds, model_pred_probs, y_true):
+    """Only works for binary classification"""
+    return input_X_df.loc[(model_preds == 0) & (y_true == 1)]
