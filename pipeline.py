@@ -29,7 +29,7 @@ is_multiclass = False
 DF = data.ModelData(input_df, target_name, split_ratios)
 
 if is_multiclass:
-    # Multiclass cl=assification
+    # Multiclass classification
     bin = data.BinEncoder()
     bin.fit(DF.y_train, 5)
     
@@ -185,22 +185,104 @@ false_positive_records = models.get_false_positive_records(
 
 #%%
 
-class ModelPipeline():
-    def __init__(self, input_DF_object, pipeline_parameters):
-        self.DF = input_DF_object
-        self.pipeline_parameters = pipeline_parameters
-        
-        self.results = []
-        self.pipeline_graph = []
-        
-    def fit_pipeline(self):
-        return True
     
-    def predict_pipeline(self):
-        return True
+input_df = data.load_file('data/train.csv')
 
-    def save_models(self):
-        return True
+# Set target_variable, train, validation, and test sets
+target_name = 'SalePrice'
+split_ratios = {'train' : 0.60,
+                'validation' : 0.20,
+                'test' : 0.20}
+is_multiclass = False
+
+DF = data.ModelData(input_df, target_name, split_ratios)
+
+if is_multiclass:
+    # Multiclass cl=assification
+    bin = data.BinEncoder()
+    bin.fit(DF.y_train, 5)
+    
+    DF.y_train.update(bin.transform(DF.y_train))
+    DF.y_val.update(bin.transform(DF.y_val))
+
+else:
+    # Binary classification
+    DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
+    DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
+
+
+pipeline_parameters = {
+    'removed_features' : ['Id', 'PoolArea', 'PoolQC', '3SsnPorch', 'Alley',
+                         'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'],
+    'imputing_strategies' : {col : {'strategy' : 'mode', 'constant_value' : None, 'model' : None} 
+                                  for col in DF.X_train.loc[
+                                          :, ~DF.X_train.columns.isin(['Id', 'PoolArea', 'PoolQC', '3SsnPorch', 'Alley',
+                                                               'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'])].loc[
+                                              :, DF.X_train.isna().any()]},
+    'categorical_encodings' : {col : {'encoding' : 'mean', 'model' : None} 
+                                  for col in DF.X_train.select_dtypes('object').columns},
+    'include_engineered_feats' : True,
+    'include_clustered_feats' : True,
+    'models' : {
+        'LGBM' : {'default_hyperparameters' : {'num_leaves' : 10},
+                  'gridsearch_hyperparameters' : {'num_leaves':[5, 15, 30, 60, 90]}},
+        
+        'Logistic Regression' : {'default_hyperparameters' : {'C' : 1, 'penalty' : 'l2'},
+                  'gridsearch_hyperparameters' : {'C':[0.01, 0.1, 1, 10, 100]}},
+        
+        'Random Forest' : {'default_hyperparameters' : {'max_depth' : 10},
+                  'gridsearch_hyperparameters' : {'max_depth':[1, 2, 8, 10, 20]}},
+    
+        'SVM' : {'default_hyperparameters' : {'C' : 1},
+                  'gridsearch_hyperparameters' : {'C':[0.01, 0.1, 10],
+                                                  'kernel':['linear', 'rbf']}},
+        
+        'KNN' : {'default_hyperparameters' : {'n_neighbors' : 5},
+                  'gridsearch_hyperparameters' : None},
+        }
+    }
+
+
+#%%
+
+input_X_df = DF.X_train.copy()
+input_y_df = DF.y_train.copy()
+train=False
+
+
+def model_pipeline(input_X_df, input_y_df, pipeline_parameters, train=True):
+    pipeline_graph = []
+    model_results = []
+    
+    pipeline_graph.append('Remove unused features')
+    input_X_df = data.drop_columns(input_X_df, pipeline_parameters['removed_features'])
+    
+    pipeline_graph.append('Remove duplicates')
+    if train:
+        # Check whether there are duplicates and remove
+        duplicate_rows = data.get_duplicate_rows(input_X_df)
+    
+        n_duplicated_rows = len(set(duplicate_rows.index).intersection(set(DF.X_train.index)))
+    
+        if n_duplicated_rows > 0:
+            DF.X_train.drop(duplicate_rows.index, axis=0, inplace=True)
+            DF.X_train.reset_index(drop=True, inplace=True)
+            print("Removed {} duplicated rows.".format(n_duplicated_rows))
+
+    pipeline_graph.append('Fill null values')
+    if train:
+        data.fit_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
+    input_X_df = data.transform_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
+    
+    return input_X_df, pipeline_parameters, pipeline_graph
+
+model_pipeline(input_X_df, input_y_df, pipeline_parameters)
+
+
+
+
+
+
 
 
 

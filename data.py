@@ -150,9 +150,18 @@ def get_duplicate_rows(input_df, column_subset=None):
     else:
         return input_df.loc[input_df.duplicated(subset=column_subset, keep='first')]
 
-# Get duplicate rows then remove them from dataframe
-# duplicate_rows = get_duplicate_rows(input_df, column_subset)
-# df = df.drop(duplicate_rows.index).reset_index(drop=True)
+def drop_duplicate_rows(input_df, column_subset=None):
+    output_df = input_df.copy()
+    # Get duplicate rows then remove them from dataframe
+    duplicate_rows = get_duplicate_rows(output_df, column_subset)
+    output_df = output_df.drop(duplicate_rows.index).reset_index(drop=True)
+    
+    return output_df 
+
+def drop_columns(input_df, columns):
+    output_df = input_df.copy()
+    output_df.drop(columns, axis=1, inplace=True)
+    return output_df
 
 #%% Handle Null Values
 
@@ -160,8 +169,8 @@ class SimpleImputer():
     def __init__(self):
         self.model_parameters = {}
     
-    def fit(self, input_series, strategy='mean'):
-        valid_strategies = ['mean', 'median', 'mode', 'unknown']
+    def fit(self, input_series, strategy='mean', constant_value=None):
+        valid_strategies = ['mean', 'median', 'mode', 'unknown', 'constant_value']
         assert strategy in valid_strategies
 
         if strategy == 'mean':
@@ -175,6 +184,9 @@ class SimpleImputer():
         
         elif strategy == 'unknown':
             self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : 'unknown'}
+            
+        elif strategy == 'constant_value':
+            self.model_parameters[input_series.name] = {'strategy' : strategy, 'value' : constant_value}
         
         else:
             print("Please select one of: {} as imputation strategy".format(valid_strategies))
@@ -183,10 +195,6 @@ class SimpleImputer():
     
     def transform(self, input_series):
         return input_series.fillna(self.model_parameters[input_series.name]['value'])
-
-    def apply_constant_value(self, input_series, constant_value):
-        self.model_parameters[input_series.name] = {'strategy' : 'constant value', 'value' : constant_value}
-        return input_series.fillna(constant_value)
     
     def fit_df(self, input_df, strategy='mean'):
         for col in input_df:
@@ -208,6 +216,27 @@ class SimpleImputer():
             output_df[col] = self.transform(output_df[col])
         
         return output_df
+
+def fit_null_value_imputing(input_X_train, imputing_strategies_dict):
+    for col_name in imputing_strategies_dict:
+        simple_imputer = SimpleImputer()
+        simple_imputer.fit(
+            input_X_train[col_name],
+            strategy=imputing_strategies_dict[col_name]['strategy'],
+            constant_value=imputing_strategies_dict[col_name]['constant_value'])
+        imputing_strategies_dict[col_name]['model'] = simple_imputer
+
+    return imputing_strategies_dict
+
+def transform_null_value_imputing(input_df, imputing_strategies_dict):
+    output_df = input_df.copy()
+    
+    for col_name in imputing_strategies_dict:
+        simple_imputer = imputing_strategies_dict[col_name]['model']
+        output_df[col_name] = simple_imputer.transform(output_df[col_name])
+        
+    return output_df
+
 
 #%% Handle imbalanced datasets
 
