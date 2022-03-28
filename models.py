@@ -198,7 +198,8 @@ def get_confusion_matrix(model_preds, y_true):
 def evaluate_model(model_preds, model_pred_probs, y_true, beta=1):
     results = {}
     results['accuracy'] = get_model_accuracy(model_preds, y_true)
-    results['AUC'] = get_model_AUC(model_pred_probs, y_true)
+    if model_pred_probs is not None:
+        results['AUC'] = get_model_AUC(model_pred_probs, y_true)
     results['precision'] = get_model_precision(model_preds, y_true)
     results['recall'] = get_model_recall(model_preds, y_true)
     results['f-score'] = {'beta': beta,

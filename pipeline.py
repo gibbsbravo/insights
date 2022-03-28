@@ -198,7 +198,7 @@ is_multiclass = False
 DF = data.ModelData(input_df, target_name, split_ratios)
 
 if is_multiclass:
-    # Multiclass cl=assification
+    # Multiclass classification
     bin = data.BinEncoder()
     bin.fit(DF.y_train, 5)
     
@@ -210,19 +210,29 @@ else:
     DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
     DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
 
+removed_features = ['Id', 'PoolArea', 'PoolQC', '3SsnPorch', 'Alley',
+                     'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal']
 
 pipeline_parameters = {
-    'removed_features' : ['Id', 'PoolArea', 'PoolQC', '3SsnPorch', 'Alley',
-                         'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'],
+    'removed_features' : removed_features,
     'imputing_strategies' : {col : {'strategy' : 'mode', 'constant_value' : None, 'model' : None} 
-                                  for col in DF.X_train.loc[
-                                          :, ~DF.X_train.columns.isin(['Id', 'PoolArea', 'PoolQC', '3SsnPorch', 'Alley',
-                                                               'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal'])].loc[
-                                              :, DF.X_train.isna().any()]},
+                                  for col in DF.X_train.loc[:, DF.X_train.isna().any()] if col not in removed_features},
     'categorical_encodings' : {col : {'encoding' : 'mean', 'model' : None} 
-                                  for col in DF.X_train.select_dtypes('object').columns},
+                                  for col in DF.X_train.select_dtypes('object').columns if col not in removed_features},
     'include_engineered_feats' : True,
     'include_clustered_feats' : True,
+    'cluster_models' : [
+        {'cluster_name' : 'all_features_kmeans',
+         'model_name' : 'Kmeans',
+         'features' : [],
+         'n_clusters' : 3,
+         'model' : None},
+        {'cluster_name' : 'neighborhood_kmeans',
+         'model_name' : 'Kmeans',
+         'features' : ['MSSubClass', 'Neighborhood', 'MSZoning'],
+         'n_clusters' : 3,
+         'model' : None}],
+    
     'models' : {
         'LGBM' : {'default_hyperparameters' : {'num_leaves' : 10},
                   'gridsearch_hyperparameters' : {'num_leaves':[5, 15, 30, 60, 90]}},
@@ -247,75 +257,90 @@ pipeline_parameters = {
 
 input_X_df = DF.X_train.copy()
 input_y_df = DF.y_train.copy()
-train=False
+train=True
 
 
-def model_pipeline(input_X_df, input_y_df, pipeline_parameters, train=True):
-    pipeline_graph = []
-    model_results = []
+# def model_pipeline(input_X_df, input_y_df, pipeline_parameters, train=True):
+pipeline_graph = []
+model_results = []
+
+pipeline_graph.append('Remove unused features')
+input_X_df = data.drop_columns(input_X_df, pipeline_parameters['removed_features'])
+
+pipeline_graph.append('Remove duplicates')
+if train:
+    # Check whether there are duplicates and remove
+    duplicate_rows = data.get_duplicate_rows(input_X_df)
+
+    n_duplicated_rows = len(set(duplicate_rows.index).intersection(set(DF.X_train.index)))
+
+    if n_duplicated_rows > 0:
+        DF.X_train.drop(duplicate_rows.index, axis=0, inplace=True)
+        DF.X_train.reset_index(drop=True, inplace=True)
+        print("Removed {} duplicated rows.".format(n_duplicated_rows))
+
+pipeline_graph.append('Fill null values')
+if train:
+    data.fit_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
+input_X_df = data.transform_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
     
-    pipeline_graph.append('Remove unused features')
-    input_X_df = data.drop_columns(input_X_df, pipeline_parameters['removed_features'])
-    
-    pipeline_graph.append('Remove duplicates')
+pipeline_graph.append('Encode categorical features')
+if train:
+    categorical_encodings_dict = data.fit_cat_encoding(
+        input_X_df, input_y_df, pipeline_parameters['categorical_encodings'])
+input_X_df = data.transform_cat_encoding(input_X_df, categorical_encodings_dict)
+
+pipeline_graph.append('Remove outliers')
+outliers = eda.get_isolation_forest_outliers(input_X_df)
+print('{} records ({:.2%}) identified as an outlier'.format(
+    len(outliers['outlier_rows']),
+    outliers['outlier_proportion']))
+
+input_X_df.drop(outliers['outlier_rows'].index,inplace=True)
+input_y_df.drop(outliers['outlier_rows'].index,inplace=True)
+input_X_df.reset_index(inplace=True, drop=True)
+input_y_df.reset_index(inplace=True, drop=True)
+
+pipeline_graph.append('Scale Features')
+if train:
+    sc = data.StandardScaler()
+    sc.fit_df(input_X_df)
+input_X_df = sc.transform_df(input_X_df)
+
+pipeline_graph.append('Train cluster models')
+for cm_params in pipeline_parameters['cluster_models']:
     if train:
-        # Check whether there are duplicates and remove
-        duplicate_rows = data.get_duplicate_rows(input_X_df)
-    
-        n_duplicated_rows = len(set(duplicate_rows.index).intersection(set(DF.X_train.index)))
-    
-        if n_duplicated_rows > 0:
-            DF.X_train.drop(duplicate_rows.index, axis=0, inplace=True)
-            DF.X_train.reset_index(drop=True, inplace=True)
-            print("Removed {} duplicated rows.".format(n_duplicated_rows))
+        cluster_model = ul.ClusteringModels(cm_params['model_name'])
+        cluster_model.fit(
+            input_X_df[cm_params['features']] if len(cm_params['features']) > 0 else input_X_df,
+            n_clusters=cm_params['n_clusters'])
+        cm_params['model'] = cluster_model
 
-    pipeline_graph.append('Fill null values')
-    if train:
-        data.fit_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
-    input_X_df = data.transform_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
-    
-    return input_X_df, pipeline_parameters, pipeline_graph
+    input_X_df[cm_params['cluster_name']] = cluster_model.predict(
+        input_X_df[cm_params['features']] if len(cm_params['features']) > 0 else input_X_df)
 
-model_pipeline(input_X_df, input_y_df, pipeline_parameters)
+    pipeline_parameters['categorical_encodings'][cm_params['cluster_name']] = {
+        'encoding' : 'one-hot', 'model' : None} 
+    input_X_df = data.transform_cat_encoding(
+        input_X_df,
+        {key : value for key, value in categorical_encodings_dict.items() if key == cm_params['cluster_name']})
 
+pipeline_graph.append('Train models')
+for model_name, params in pipeline_parameters['models'].items():
+    model = models.ClassificationModels(
+        model_name, 
+        hyperparameters=params['default_hyperparameters'])
+    if params['gridsearch_hyperparameters'] is not None:
+        model.gridsearch_hyperparameters(
+            input_X_df, input_y_df, params['gridsearch_hyperparameters'])
 
+    model.fit(input_X_df, input_y_df)
+    pipeline_parameters['models'][model_name]['model'] = model
 
-
-
-
-
-
-
-
-
-#%%
-if False:
-    classifier = models.ClassificationModels('LGBM', hyperparameters={'num_leaves' : 10, 'n_estimators': 100})
-    classifier.gridsearch(DF.X_train, DF.y_train, {'num_leaves':[5, 15, 30, 60, 90]})
-    
-    classifier = models.ClassificationModels('Logistic Regression', hyperparameters={'C' : 1, 'penalty' : 'l2'})
-    classifier.gridsearch(DF.X_train, DF.y_train, {'C':[0.01,0.1,1,10,100]})
-    
-    classifier = models.ClassificationModels('Random Forest', hyperparameters={'max_depth' : 1})
-    classifier.gridsearch(DF.X_train, DF.y_train, {'max_depth':[1, 2, 8, 10, 20]})
-    
-    classifier = models.ClassificationModels('SVM', hyperparameters={'C' : 1})
-    classifier.gridsearch(DF.X_train, DF.y_train, {'C':[0.01,0.1,10,], 'kernel':['linear', 'poly', 'rbf']})
-    
-    classifier.fit(DF.X_train, DF.y_train)
-    
-    model_preds = classifier.predict(DF.X_val)
-    
-    models.evaluate_model(model_preds, DF.y_val)
-    
-
-
-
-
-
-
-
-
+pipeline_graph.append('Get Model Predictions and Evaluate Performance')
+for model_name, params in pipeline_parameters['models'].items():
+    y_train_pred, y_train_pred_probs = params['model'].predict(input_X_df)
+    performance = models.evaluate_model(y_train_pred, y_train_pred_probs, input_y_df)
 
 
 
