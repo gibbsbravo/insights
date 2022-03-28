@@ -210,59 +210,33 @@ else:
     DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
     DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
 
-removed_features = ['Id', 'PoolArea', 'PoolQC', '3SsnPorch', 'Alley',
-                     'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal']
+# removed_features = ['Id', 'PoolArea', 'PoolQC', '3SsnPorch', 'Alley',
+#                      'MiscFeature', 'LowQualFinSF', 'ScreenPorch', 'MiscVal']
 
-pipeline_parameters = {
-    'removed_features' : removed_features,
-    'imputing_strategies' : {col : {'strategy' : 'mode', 'constant_value' : None, 'model' : None} 
-                                  for col in DF.X_train.loc[:, DF.X_train.isna().any()] if col not in removed_features},
-    'categorical_encodings' : {col : {'encoding' : 'mean', 'model' : None} 
-                                  for col in DF.X_train.select_dtypes('object').columns if col not in removed_features},
-    'include_engineered_feats' : True,
-    'include_clustered_feats' : True,
-    'cluster_models' : [
-        {'cluster_name' : 'all_features_kmeans',
-         'model_name' : 'Kmeans',
-         'features' : [],
-         'n_clusters' : 3,
-         'model' : None},
-        {'cluster_name' : 'neighborhood_kmeans',
-         'model_name' : 'Kmeans',
-         'features' : ['MSSubClass', 'Neighborhood', 'MSZoning'],
-         'n_clusters' : 3,
-         'model' : None}],
-    
-    'models' : {
-        'LGBM' : {'default_hyperparameters' : {'num_leaves' : 10},
-                  'gridsearch_hyperparameters' : {'num_leaves':[5, 15, 30, 60, 90]}},
-        
-        'Logistic Regression' : {'default_hyperparameters' : {'C' : 1, 'penalty' : 'l2'},
-                  'gridsearch_hyperparameters' : {'C':[0.01, 0.1, 1, 10, 100]}},
-        
-        'Random Forest' : {'default_hyperparameters' : {'max_depth' : 10},
-                  'gridsearch_hyperparameters' : {'max_depth':[1, 2, 8, 10, 20]}},
-    
-        'SVM' : {'default_hyperparameters' : {'C' : 1},
-                  'gridsearch_hyperparameters' : {'C':[0.01, 0.1, 10],
-                                                  'kernel':['linear', 'rbf']}},
-        
-        'KNN' : {'default_hyperparameters' : {'n_neighbors' : 5},
-                  'gridsearch_hyperparameters' : None},
-        }
-    }
 
+# ['MSSubClass', 'Neighborhood', 'MSZoning']
+
+# create_parameters_template(
+#     DF.X_train, 
+#     output_file_path='data/pipeline_parameters.json', 
+#     overwrite=False)
 
 #%%
 
-input_X_df = DF.X_train.copy()
-input_y_df = DF.y_train.copy()
-train=True
-
-
 # def model_pipeline(input_X_df, input_y_df, pipeline_parameters, train=True):
+
+train=False
+verbose=True
 pipeline_graph = []
-model_results = []
+
+if train:
+    input_X_df = DF.X_train.copy()
+    input_y_df = DF.y_train.copy()
+    pipeline_parameters = data.load_file('data/pipeline_parameters.json')
+else:
+    input_X_df = DF.X_val.copy()
+    input_y_df = DF.y_val.copy()
+    pipeline_parameters = data.load_file('outputs/trained_parameters.pickle')
 
 pipeline_graph.append('Remove unused features')
 input_X_df = data.drop_columns(input_X_df, pipeline_parameters['removed_features'])
@@ -282,41 +256,47 @@ if train:
 pipeline_graph.append('Fill null values')
 if train:
     data.fit_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
-input_X_df = data.transform_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
-    
+input_X_df = data.transform_null_value_imputing(
+    input_X_df, 
+    pipeline_parameters['imputing_strategies'],
+    verbose=verbose)
+
 pipeline_graph.append('Encode categorical features')
 if train:
     categorical_encodings_dict = data.fit_cat_encoding(
         input_X_df, input_y_df, pipeline_parameters['categorical_encodings'])
 input_X_df = data.transform_cat_encoding(input_X_df, categorical_encodings_dict)
 
-pipeline_graph.append('Remove outliers')
-outliers = eda.get_isolation_forest_outliers(input_X_df)
-print('{} records ({:.2%}) identified as an outlier'.format(
-    len(outliers['outlier_rows']),
-    outliers['outlier_proportion']))
+if train:
+    pipeline_graph.append('Remove outliers')
+    outliers = eda.get_isolation_forest_outliers(input_X_df)
+    print('{} records ({:.2%}) identified as an outlier'.format(
+        len(outliers['outlier_rows']),
+        outliers['outlier_proportion']))
+    
+    input_X_df.drop(outliers['outlier_rows'].index,inplace=True)
+    input_y_df.drop(outliers['outlier_rows'].index,inplace=True)
+    input_X_df.reset_index(inplace=True, drop=True)
+    input_y_df.reset_index(inplace=True, drop=True)
 
-input_X_df.drop(outliers['outlier_rows'].index,inplace=True)
-input_y_df.drop(outliers['outlier_rows'].index,inplace=True)
-input_X_df.reset_index(inplace=True, drop=True)
-input_y_df.reset_index(inplace=True, drop=True)
-
-pipeline_graph.append('Scale Features')
+pipeline_graph.append('Standard Scale Features')
 if train:
     sc = data.StandardScaler()
     sc.fit_df(input_X_df)
-input_X_df = sc.transform_df(input_X_df)
+    pipeline_parameters['feature_scaling_model'] = {'approach' : 'standard', 'model' : sc}
+input_X_df = pipeline_parameters['feature_scaling_model']['model'].transform_df(input_X_df)
 
-pipeline_graph.append('Train cluster models')
 for cm_params in pipeline_parameters['cluster_models']:
     if train:
+        pipeline_graph.append('Train cluster model: {}'.format(cm_params['cluster_name']))
         cluster_model = ul.ClusteringModels(cm_params['model_name'])
         cluster_model.fit(
             input_X_df[cm_params['features']] if len(cm_params['features']) > 0 else input_X_df,
             n_clusters=cm_params['n_clusters'])
         cm_params['model'] = cluster_model
 
-    input_X_df[cm_params['cluster_name']] = cluster_model.predict(
+    pipeline_graph.append('Predict cluster model: {}'.format(cm_params['cluster_name']))
+    input_X_df[cm_params['cluster_name']] = cm_params['model'].predict(
         input_X_df[cm_params['features']] if len(cm_params['features']) > 0 else input_X_df)
 
     pipeline_parameters['categorical_encodings'][cm_params['cluster_name']] = {
@@ -325,22 +305,29 @@ for cm_params in pipeline_parameters['cluster_models']:
         input_X_df,
         {key : value for key, value in categorical_encodings_dict.items() if key == cm_params['cluster_name']})
 
-pipeline_graph.append('Train models')
-for model_name, params in pipeline_parameters['models'].items():
-    model = models.ClassificationModels(
-        model_name, 
-        hyperparameters=params['default_hyperparameters'])
-    if params['gridsearch_hyperparameters'] is not None:
-        model.gridsearch_hyperparameters(
-            input_X_df, input_y_df, params['gridsearch_hyperparameters'])
-
-    model.fit(input_X_df, input_y_df)
-    pipeline_parameters['models'][model_name]['model'] = model
+if train:
+    pipeline_graph.append('Train models')
+    for model_name, params in pipeline_parameters['models'].items():
+        model = models.ClassificationModels(
+            model_name, 
+            hyperparameters=params['default_hyperparameters'])
+        if params['gridsearch_hyperparameters'] is not None:
+            model.gridsearch_hyperparameters(
+                input_X_df, input_y_df, params['gridsearch_hyperparameters'])
+    
+        model.fit(input_X_df, input_y_df)
+        pipeline_parameters['models'][model_name]['model'] = model
 
 pipeline_graph.append('Get Model Predictions and Evaluate Performance')
 for model_name, params in pipeline_parameters['models'].items():
     y_train_pred, y_train_pred_probs = params['model'].predict(input_X_df)
-    performance = models.evaluate_model(y_train_pred, y_train_pred_probs, input_y_df)
+    params['performance'] = models.evaluate_model(y_train_pred, y_train_pred_probs, input_y_df)
 
 
+data.save_file(
+    pipeline_parameters, 
+    'outputs/trained_parameters.pickle',
+    overwrite=False)
 
+# Add date
+# add whether train or validation and data size 

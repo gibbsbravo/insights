@@ -36,7 +36,7 @@ class ClassificationModels():
                 input_X_train, input_y_train)
             
         elif self.model_name == 'Logistic Regression':
-            model = LogisticRegression(random_state=34)
+            model = LogisticRegression(random_state=34, max_iter=1000)
             clf = GridSearchCV(model, gs_hyperparameters).fit(
                     input_X_train, input_y_train)
         
@@ -77,7 +77,8 @@ class ClassificationModels():
         elif self.model_name == 'Logistic Regression':
             model = LogisticRegression(
                 C=self.hyperparameters['C'],
-                random_state=34)
+                random_state=34, 
+                max_iter=1000)
             model.fit(input_X_train, input_y_train)
             
             self.feature_importance = self.format_feature_importance_df(

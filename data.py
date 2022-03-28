@@ -71,7 +71,7 @@ def save_file(output_object, output_file_path, overwrite=False):
             
         elif file_extension == '.json':  
             with open(output_file_path, 'w') as output_file:
-                json.dump(output_object, output_file)
+                json.dump(output_object, output_file, indent=4)
         
         elif file_extension == '.pickle':  
             with open(output_file_path, "wb") as output_file:
@@ -87,6 +87,50 @@ def save_file(output_object, output_file_path, overwrite=False):
 
 def sample_data(input_df, fraction=0.40):
     return pd.sample(frac=fraction, replace=False, random_state=34)
+
+def create_parameters_template(input_X_train, output_file_path='data/pipeline_parameters.json', overwrite=False):
+    pipeline_parameters = {
+        'removed_features' : [],
+        'imputing_strategies' : {col : {'strategy' : 'mode', 'constant_value' : None, 'model' : None} 
+                                      for col in input_X_train.loc[:, input_X_train.isna().any()]},
+        'categorical_encodings' : {col : {'encoding' : 'mean', 'model' : None} 
+                                      for col in input_X_train.select_dtypes('object').columns},
+        'include_engineered_feats' : True,
+        'include_clustered_feats' : True,
+        'cluster_models' : [
+            {'cluster_name' : 'all_features_kmeans',
+             'model_name' : 'Kmeans',
+             'features' : [],
+             'n_clusters' : 5,
+             'model' : None},
+            {'cluster_name' : 'neighborhood_kmeans',
+             'model_name' : 'Kmeans',
+             'features' : [],
+             'n_clusters' : 5,
+             'model' : None}],
+        
+        'models' : {
+            'LGBM' : {'default_hyperparameters' : {'num_leaves' : 10},
+                      'gridsearch_hyperparameters' : {'num_leaves':[5, 15, 30, 60, 90]}},
+            
+            'Logistic Regression' : {'default_hyperparameters' : {'C' : 1, 'penalty' : 'l2'},
+                      'gridsearch_hyperparameters' : {'C':[0.01, 0.1, 1, 10, 100]}},
+            
+            'Random Forest' : {'default_hyperparameters' : {'max_depth' : 10},
+                      'gridsearch_hyperparameters' : {'max_depth':[1, 2, 8, 10, 20]}},
+        
+            'SVM' : {'default_hyperparameters' : {'C' : 1},
+                      'gridsearch_hyperparameters' : {'C':[0.01, 0.1, 10],
+                                                      'kernel':['linear', 'rbf']}},
+            
+            'KNN' : {'default_hyperparameters' : {'n_neighbors' : 5},
+                      'gridsearch_hyperparameters' : None},
+            }
+        }
+    
+    save_file(pipeline_parameters, output_file_path, overwrite)
+    
+    return pipeline_parameters
 
 #%% Train Validation Test Split / Cross Validation
 
@@ -217,26 +261,39 @@ class SimpleImputer():
         
         return output_df
 
-def fit_null_value_imputing(input_X_train, imputing_strategies_dict):
+def fit_null_value_imputing(input_X_train, imputing_strategies_dict, verbose=True):
+    removed_features = []
     for col_name in imputing_strategies_dict:
-        simple_imputer = SimpleImputer()
-        simple_imputer.fit(
-            input_X_train[col_name],
-            strategy=imputing_strategies_dict[col_name]['strategy'],
-            constant_value=imputing_strategies_dict[col_name]['constant_value'])
-        imputing_strategies_dict[col_name]['model'] = simple_imputer
+        if col_name not in input_X_train.columns:
+            removed_features.append(col_name)
+        else:
+            simple_imputer = SimpleImputer()
+            simple_imputer.fit(
+                input_X_train[col_name],
+                strategy=imputing_strategies_dict[col_name]['strategy'],
+                constant_value=imputing_strategies_dict[col_name]['constant_value'])
+            imputing_strategies_dict[col_name]['model'] = simple_imputer
+    
+    if (len(removed_features) > 0) & (verbose):
+        print("Null value fitting warning: can't fit {} columns as they have been removed".format(removed_features))
 
     return imputing_strategies_dict
 
-def transform_null_value_imputing(input_df, imputing_strategies_dict):
+def transform_null_value_imputing(input_df, imputing_strategies_dict, verbose=True):
     output_df = input_df.copy()
+    removed_features = []
     
     for col_name in imputing_strategies_dict:
-        simple_imputer = imputing_strategies_dict[col_name]['model']
-        output_df[col_name] = simple_imputer.transform(output_df[col_name])
-        
+        if col_name not in input_df.columns:
+            removed_features.append(col_name)
+        else:
+            simple_imputer = imputing_strategies_dict[col_name]['model']
+            output_df[col_name] = simple_imputer.transform(output_df[col_name])
+    
+    if (len(removed_features) > 0) & (verbose):
+        print("Null value transform warning: can't transform {} columns as they have been removed".format(removed_features))
+    
     return output_df
-
 
 #%% Handle imbalanced datasets
 
@@ -387,35 +444,51 @@ def one_hot_encode_column(input_series):
     
     return one_hot_df
 
-def fit_cat_encoding(input_X_train, input_y_train, categorical_encodings_dict):
+def fit_cat_encoding(input_X_train, input_y_train, categorical_encodings_dict, verbose=True):
+    removed_features = []
+
     for col_name in categorical_encodings_dict:
-        if categorical_encodings_dict[col_name]['encoding'] == 'mean':
-            mean_encoder = MeanEncoder()
-            mean_encoder.fit(input_X_train[col_name], input_y_train)
-            categorical_encodings_dict[col_name]['model'] = mean_encoder
+        if col_name not in input_X_train.columns:
+            removed_features.append(col_name)
+        else:        
+            if categorical_encodings_dict[col_name]['encoding'] == 'mean':
+                mean_encoder = MeanEncoder()
+                mean_encoder.fit(input_X_train[col_name], input_y_train)
+                categorical_encodings_dict[col_name]['model'] = mean_encoder
+
+    if (len(removed_features) > 0) & (verbose):
+        print("Cat encoding fitting warning: can't fit {} columns as they have been removed".format(removed_features))
 
     return categorical_encodings_dict
 
-def transform_cat_encoding(input_df, categorical_encodings_dict):
+def transform_cat_encoding(input_df, categorical_encodings_dict, verbose=True):
     output_df = input_df.copy()
+    removed_features = []
     
     for col_name in categorical_encodings_dict:
-        if categorical_encodings_dict[col_name]['encoding'] == 'mean':
-            mean_encoder = categorical_encodings_dict[col_name]['model']
-            output_df[col_name] = mean_encoder.transform(output_df[col_name])
-
-        elif categorical_encodings_dict[col_name]['encoding'] == 'one-hot':
-            if len(set(output_df[col_name])) == 2:
-                top_value = output_df[col_name].value_counts().index[0]
-                binary_col_name = col_name + " is " + top_value
-                output_df[binary_col_name] = np.where(output_df[col_name] == top_value, 1, 0)
+        if col_name not in input_df.columns:
+            removed_features.append(col_name)
+        else:
+            if categorical_encodings_dict[col_name]['encoding'] == 'mean':
+                mean_encoder = categorical_encodings_dict[col_name]['model']
+                output_df[col_name] = mean_encoder.transform(output_df[col_name])
+    
+            elif categorical_encodings_dict[col_name]['encoding'] == 'one-hot':
+                if len(set(output_df[col_name])) == 2:
+                    top_value = output_df[col_name].value_counts().index[0]
+                    binary_col_name = col_name + " is " + top_value
+                    output_df[binary_col_name] = np.where(output_df[col_name] == top_value, 1, 0)
+                
+                else:
+                    one_hot_columns = one_hot_encode_column(output_df[col_name])
+                    output_df = pd.concat([output_df, one_hot_columns], axis=1)
+                
+                output_df.drop(col_name, axis=1, inplace=True)
             
-            else:
-                one_hot_columns = one_hot_encode_column(output_df[col_name])
-                output_df = pd.concat([output_df, one_hot_columns], axis=1)
-            
-            output_df.drop(col_name, axis=1, inplace=True)
-            
+    
+    if (len(removed_features) > 0) & (verbose):
+        print("Cat encoding transform warning: can't transform {} columns as they have been removed".format(removed_features))
+    
     return output_df
 
 def log_transform_column(input_series):
