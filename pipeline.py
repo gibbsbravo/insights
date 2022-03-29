@@ -226,7 +226,7 @@ else:
 
 # def model_pipeline(input_X_df, input_y_df, pipeline_parameters, train=True):
 
-is_train_models=False
+is_train_models=True
 verbose=True
 pipeline_graph = ["Pipeline Graph:"]
 
@@ -329,8 +329,8 @@ for model_name, params in pipeline_parameters['models'].items():
 pipeline_parameters['run_config'] = {
     'run_name' : 'base_config_validation',
     'date' : datetime.datetime.now().strftime("%d-%b-%Y - %I:%M %p"),
-    'input_X_df' : input_X_df,
-    'input_y_df' : input_y_df,
+    'input_X_df_shape' : input_X_df.shape,
+    'input_y_df_shape' : input_y_df.shape,
     'is_train_models' : is_train_models,
     'verbose': verbose,
     'pipeline_graph' : pipeline_graph}
@@ -345,23 +345,28 @@ data.save_file(
 #%%
 
 
-file_name = 'outputs/2022.03.29.11_25_AM_model_preds.pickle'
+file_names = ['outputs/2022.03.29.11_25_AM_model_preds.pickle', 
+              'outputs/2022.03.29.11_41_AM_trained_parameters.pickle']
 
 results = []
-pipeline_parameters = data.load_file(file_name)
 
-for model_name, values in pipeline_parameters['models'].items():
-    model_performance = values['performance']
-    model_performance['model_name'] = model_name
-    model_performance['file_name'] = file_name
-    model_performance['config_name'] = pipeline_parameters['run_config']['run_name']
+for file_name in file_names:
+    pipeline_parameters = data.load_file(file_name)
     
-    model_performance['f{}-score'.format(model_performance['f-score']['beta'])] = model_performance['f-score']['score']
-    model_performance = {key : value for key, value in model_performance.items() if key not in ['confusion_matrix', 'f-score']}
-    
-    results.append(model_performance)
+    for model_name, values in pipeline_parameters['models'].items():
+        model_performance = values['performance']
+        model_performance['model_name'] = model_name
+        model_performance['file_name'] = file_name
+        model_performance['config_name'] = pipeline_parameters['run_config']['run_name']
+        model_performance['X_input_shape'] = pipeline_parameters['run_config']['input_X_df_shape']
+        model_performance['is_train_models'] = pipeline_parameters['run_config']['is_train_models']
+        
+        model_performance['f{}-score'.format(model_performance['f-score']['beta'])] = model_performance['f-score']['score']
+        model_performance = {key : value for key, value in model_performance.items() if key not in ['confusion_matrix', 'f-score']}
+        
+        results.append(model_performance)
 
-a = pd.DataFrame(results)
+results_df = pd.DataFrame(results)
 
 
 
