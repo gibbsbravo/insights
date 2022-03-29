@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import datetime
 
 import os
 import data
@@ -225,11 +226,11 @@ else:
 
 # def model_pipeline(input_X_df, input_y_df, pipeline_parameters, train=True):
 
-train=False
+is_train_models=False
 verbose=True
-pipeline_graph = []
+pipeline_graph = ["Pipeline Graph:"]
 
-if train:
+if is_train_models:
     input_X_df = DF.X_train.copy()
     input_y_df = DF.y_train.copy()
     pipeline_parameters = data.load_file('data/pipeline_parameters.json')
@@ -242,7 +243,7 @@ pipeline_graph.append('Remove unused features')
 input_X_df = data.drop_columns(input_X_df, pipeline_parameters['removed_features'])
 
 pipeline_graph.append('Remove duplicates')
-if train:
+if is_train_models:
     # Check whether there are duplicates and remove
     duplicate_rows = data.get_duplicate_rows(input_X_df)
 
@@ -254,7 +255,7 @@ if train:
         print("Removed {} duplicated rows.".format(n_duplicated_rows))
 
 pipeline_graph.append('Fill null values')
-if train:
+if is_train_models:
     data.fit_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
 input_X_df = data.transform_null_value_imputing(
     input_X_df, 
@@ -262,12 +263,13 @@ input_X_df = data.transform_null_value_imputing(
     verbose=verbose)
 
 pipeline_graph.append('Encode categorical features')
-if train:
-    categorical_encodings_dict = data.fit_cat_encoding(
+if is_train_models:
+    pipeline_parameters['categorical_encodings'] = data.fit_cat_encoding(
         input_X_df, input_y_df, pipeline_parameters['categorical_encodings'])
-input_X_df = data.transform_cat_encoding(input_X_df, categorical_encodings_dict)
+input_X_df = data.transform_cat_encoding(
+    input_X_df, pipeline_parameters['categorical_encodings'])
 
-if train:
+if is_train_models:
     pipeline_graph.append('Remove outliers')
     outliers = eda.get_isolation_forest_outliers(input_X_df)
     print('{} records ({:.2%}) identified as an outlier'.format(
@@ -280,14 +282,14 @@ if train:
     input_y_df.reset_index(inplace=True, drop=True)
 
 pipeline_graph.append('Standard Scale Features')
-if train:
+if is_train_models:
     sc = data.StandardScaler()
     sc.fit_df(input_X_df)
     pipeline_parameters['feature_scaling_model'] = {'approach' : 'standard', 'model' : sc}
 input_X_df = pipeline_parameters['feature_scaling_model']['model'].transform_df(input_X_df)
 
 for cm_params in pipeline_parameters['cluster_models']:
-    if train:
+    if is_train_models:
         pipeline_graph.append('Train cluster model: {}'.format(cm_params['cluster_name']))
         cluster_model = ul.ClusteringModels(cm_params['model_name'])
         cluster_model.fit(
@@ -303,9 +305,10 @@ for cm_params in pipeline_parameters['cluster_models']:
         'encoding' : 'one-hot', 'model' : None} 
     input_X_df = data.transform_cat_encoding(
         input_X_df,
-        {key : value for key, value in categorical_encodings_dict.items() if key == cm_params['cluster_name']})
+        {key : value for key, value in pipeline_parameters['categorical_encodings'].items() 
+         if key == cm_params['cluster_name']})
 
-if train:
+if is_train_models:
     pipeline_graph.append('Train models')
     for model_name, params in pipeline_parameters['models'].items():
         model = models.ClassificationModels(
@@ -323,11 +326,52 @@ for model_name, params in pipeline_parameters['models'].items():
     y_train_pred, y_train_pred_probs = params['model'].predict(input_X_df)
     params['performance'] = models.evaluate_model(y_train_pred, y_train_pred_probs, input_y_df)
 
-
+pipeline_parameters['run_config'] = {
+    'run_name' : 'base_config_validation',
+    'date' : datetime.datetime.now().strftime("%d-%b-%Y - %I:%M %p"),
+    'input_X_df' : input_X_df,
+    'input_y_df' : input_y_df,
+    'is_train_models' : is_train_models,
+    'verbose': verbose,
+    'pipeline_graph' : pipeline_graph}
+    
 data.save_file(
     pipeline_parameters, 
-    'outputs/trained_parameters.pickle',
+    'outputs/{}_{}.pickle'.format(
+        datetime.datetime.now().strftime("%Y.%m.%d.%I_%M_%p"),
+        'trained_parameters' if is_train_models else 'model_preds'),
     overwrite=False)
 
-# Add date
-# add whether train or validation and data size 
+#%%
+
+
+file_name = 'outputs/2022.03.29.11_25_AM_model_preds.pickle'
+
+results = []
+pipeline_parameters = data.load_file(file_name)
+
+for model_name, values in pipeline_parameters['models'].items():
+    model_performance = values['performance']
+    model_performance['model_name'] = model_name
+    model_performance['file_name'] = file_name
+    model_performance['config_name'] = pipeline_parameters['run_config']['run_name']
+    
+    model_performance['f{}-score'.format(model_performance['f-score']['beta'])] = model_performance['f-score']['score']
+    model_performance = {key : value for key, value in model_performance.items() if key not in ['confusion_matrix', 'f-score']}
+    
+    results.append(model_performance)
+
+a = pd.DataFrame(results)
+
+
+
+
+
+
+
+
+
+
+
+
+# print("\n--------------------------\n".join(pipeline_parameters['run_config']['pipeline_graph']))
