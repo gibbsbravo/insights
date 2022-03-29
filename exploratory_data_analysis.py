@@ -14,11 +14,11 @@ sns.set_style("white")
 
 #%% Profile data
 
-def prop_column_null(input_df):
+def get_prop_null_column(input_df):
     """Returns the proportion of null values by column"""
     return (input_df.isnull().sum(axis = 0) / len(input_df)).sort_values(ascending=False)
 
-def prop_row_null(input_df):
+def get_prop_null_row(input_df):
     """Returns the proportion of null values by row"""
     return (input_df.isnull().sum(axis = 1) / len(input_df.columns)).sort_values(ascending=False)
 

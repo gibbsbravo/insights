@@ -295,6 +295,17 @@ def transform_null_value_imputing(input_df, imputing_strategies_dict, verbose=Tr
     
     return output_df
 
+def align_feature_cols(input_X_test, input_train_cols):
+    output_X_test = input_X_test.copy()
+    cols_not_in_pred = set(input_train_cols) - set(output_X_test.columns)
+    
+    for col in cols_not_in_pred:
+        output_X_test[col] = np.zeros(shape=(len(output_X_test)))
+
+    output_X_test = output_X_test[input_train_cols]
+
+    return output_X_test
+
 #%% Handle imbalanced datasets
 
 def balance_data(input_X_train, input_y_train, target_ratio, approach='SMOTE'):
@@ -355,7 +366,10 @@ class StandardScaler():
     def transform_df(self, input_df):
         output_df = input_df.copy()
         for col in output_df:
-            output_df[col] = self.transform(output_df[col])
+            if col not in self.model_parameters:
+                continue
+            else:
+                output_df[col] = self.transform(output_df[col])
         
         return output_df
     
@@ -363,7 +377,10 @@ class StandardScaler():
         output_df = input_df.copy()
         for col in output_df:
             self.fit(output_df[col])
-            output_df[col] = self.transform(output_df[col])
+            if col not in self.model_parameters:
+                continue
+            else:
+                output_df[col] = self.transform(output_df[col])
         
         return output_df
 
@@ -440,7 +457,7 @@ class BinEncoder():
 
 def one_hot_encode_column(input_series):
     one_hot_df = pd.get_dummies(input_series)
-    one_hot_df.columns = [input_series.name+str(x) for x in one_hot_df.columns]
+    one_hot_df.columns = [input_series.name+"_"+str(x) for x in one_hot_df.columns]
     
     return one_hot_df
 
@@ -485,6 +502,8 @@ def transform_cat_encoding(input_df, categorical_encodings_dict, verbose=True):
                 
                 output_df.drop(col_name, axis=1, inplace=True)
             
+            else:
+                "Please select either 'mean' or 'one-hot' encoding"
     
     if (len(removed_features) > 0) & (verbose):
         print("Cat encoding transform warning: can't transform {} columns as they have been removed".format(removed_features))
