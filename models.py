@@ -11,6 +11,12 @@ from sklearn.metrics import roc_auc_score
 from sklearn.metrics import precision_score, recall_score, roc_curve
 from sklearn.neighbors import KNeighborsClassifier
 
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.neighbors import KNeighborsRegressor
+from mapie.regression import MapieRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
 # %matplotlib inline
 
 #%% Classification Models
@@ -197,7 +203,7 @@ def get_confusion_matrix(model_preds, y_true):
         colnames=['Predicted'],
         margins=True)
 
-def evaluate_model(model_preds, model_pred_probs, y_true, beta=1):
+def evaluate_classification_model(model_preds, model_pred_probs, y_true, beta=1):
     results = {}
     results['accuracy'] = get_model_accuracy(model_preds, y_true)
     if model_pred_probs is not None:
@@ -340,27 +346,19 @@ input_X_df = pipeline_parameters['feature_scaling_model']['model'].transform_df(
 input_X_train = input_X_df.copy()
 input_y_train = input_y_df.copy()
 
-#%%
-
-gs_hyperparameters = pipeline_parameters['models']['KNN']['gridsearch_hyperparameters']
-
-gs_hyperparameters = {'alpha': [ 1.0]}
-
 #%% Regression Models
 
-from sklearn.linear_model import LinearRegression, Lasso, Ridge
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.neighbors import KNeighborsRegressor
-
 class RegressionModels():
-    def __init__(self, model_name, hyperparameters={}):
+    def __init__(self, model_name, hyperparameters={}, ci_alpha=None):
         self.valid_models = ['LGBM', 'Linear', 'Ridge', 'Random Forest', 'KNN']
         assert model_name in self.valid_models, "Please select one of the following models: {}".format(self.valid_models)
         
         self.model_name = model_name
         self.hyperparameters = hyperparameters
+        self.ci_alpha = ci_alpha
         self.model = []
         self.feature_importance = pd.DataFrame([])
+        
     
     def gridsearch_hyperparameters(self, input_X_train, input_y_train, gs_hyperparameters):
         
@@ -442,17 +440,26 @@ class RegressionModels():
             model = KNeighborsRegressor(
                 n_neighbors=self.hyperparameters['n_neighbors'])
             model.fit(input_X_train, input_y_train)
-            
+        
+        if self.ci_alpha is not None:
+            model = MapieRegressor(model, method="plus")
+            model.fit(input_X_train, input_y_train)
+        
         self.model = model
             
     def predict(self, input_X_test):
-        if self.model_name == 'mean':
-            return np.full(shape=(len(input_X_test)), fill_value=self.model)
-        
+        if self.ci_alpha is not None:
+            pred_values, pred_interval = self.model.predict(input_X_test, alpha=self.ci_alpha)
+            return pred_values, pred_interval
+            
         else:
-            pred_values = self.model.predict(input_X_test)
-            return pred_values
-        
+            if self.model_name == 'mean':
+                return np.full(shape=(len(input_X_test)), fill_value=self.model), None
+            
+            else:
+                pred_values = self.model.predict(input_X_test)
+                return pred_values, None
+    
     def format_feature_importance_df(self, input_X_train, feature_importance):
         model_feature_importance = pd.DataFrame(feature_importance, 
                                   columns=["importance"],
@@ -471,3 +478,83 @@ class RegressionModels():
             plt.xlabel('Features')
             plt.xticks(rotation=45, ha='right')
             plt.show()
+            
+#%%
+
+model = RegressionModels(
+    model_name='LGBM', 
+    hyperparameters=pipeline_parameters['models']['LGBM']['default_hyperparameters'],
+    ci_alpha=None)
+
+model.gridsearch_hyperparameters(input_X_train, input_y_train, pipeline_parameters['models']['LGBM']['gridsearch_hyperparameters'])
+
+model.fit(input_X_train, input_y_train)
+
+model_preds, pred_interval = model.predict(input_X_train)
+
+#%% Regression model evaluation
+
+y_true = input_y_train.copy()
+
+def get_model_MAE(model_preds, y_true):
+    return np.around(mean_absolute_error(y_true, model_preds), 1)
+
+def get_model_RMSE(model_preds, y_true):
+    return np.around(mean_squared_error(y_true, model_preds, squared=False), 1)
+
+def get_model_R2(model_preds, y_true):
+    return np.around(r2_score(y_true, model_preds), 2)
+
+def get_model_MSE(model_preds, y_true):
+    return np.around(mean_squared_error(y_true, model_preds), 1)
+
+def get_model_error_dist(model_preds, y_true):
+    return np.around(((model_preds / y_true) -1).describe(), 2)
+
+def evaluate_regression_model(model_preds, y_true):
+    results = {}
+    results['Mean Absolute Error'] = get_model_MAE(model_preds, y_true)
+    results['Root Mean Squared Error'] = get_model_RMSE(model_preds, y_true)
+    results['R-Squared'] = get_model_R2(model_preds, y_true)
+    results['Mean Squared Error'] = get_model_MSE(model_preds, y_true)
+    results['Model Error Distribution'] = get_model_error_dist(model_preds, y_true)
+    
+    return results
+
+
+evaluate_regression_model(model_preds, y_true)
+
+
+
+
+
+
+#%%
+
+# model_preds.sort()
+# pred_interval.sort(0)
+
+# fig, ax = plt.subplots()
+# ax.plot(np.arange(len(model_preds)), model_preds)
+# ax.fill_between(np.arange(len(model_preds)), pred_interval[:, 0].flatten(), pred_interval[:, 1].flatten(), color='b', alpha=.1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -139,7 +139,7 @@ def model_pipeline(input_X_df,
     pipeline_graph.append('Get Model Predictions and Evaluate Performance')
     for model_name, params in pipeline_parameters['models'].items():
         y_train_pred, y_train_pred_probs = params['model'].predict(input_X_df)
-        params['performance'] = models.evaluate_model(y_train_pred, y_train_pred_probs, input_y_df)
+        params['performance'] = models.evaluate_classification_model(y_train_pred, y_train_pred_probs, input_y_df)
     
     pipeline_parameters['run_config'] = {
         'run_name' : run_name,
