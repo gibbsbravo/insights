@@ -82,7 +82,8 @@ class ClassificationModels():
             model.fit(input_X_train, input_y_train)
             
             self.feature_importance = self.format_feature_importance_df(
-                input_X_train, np.max(np.abs(model.coef_), axis=0).flatten())
+                input_X_train, 
+                np.abs(model.coef_) if (len(model.coef_.shape) == 1) else np.max(np.abs(model.coef_), axis=0).flatten())
         
         elif self.model_name == 'Random Forest':
             model = RandomForestClassifier(
@@ -114,7 +115,7 @@ class ClassificationModels():
         if self.model_name == 'majority':
             return np.full(shape=(len(input_X_test)), fill_value=self.model), None
         
-        if self.model_name == 'SVM':
+        elif self.model_name == 'SVM':
             """SVMs do not directly provide probability estimates"""
             return self.model.predict(input_X_test), None
         
@@ -141,7 +142,7 @@ class ClassificationModels():
             plt.xticks(rotation=45, ha='right')
             plt.show()
     
-#%% Model evaluation
+#%% Classification model evaluation
 def get_model_accuracy(model_preds, y_true):
     return np.around((model_preds == y_true).sum() / len(y_true), 4)
 
@@ -239,3 +240,234 @@ def get_false_positive_records(input_X_df, model_preds, model_pred_probs, y_true
 def get_false_negative_records(input_X_df, model_preds, model_pred_probs, y_true):
     """Only works for binary classification"""
     return input_X_df.loc[(model_preds == 0) & (y_true == 1)]
+
+
+#%%
+
+import data
+import exploratory_data_analysis as eda
+import os
+
+input_df = data.load_file('data/train.csv')
+
+# Set target_variable, train, validation, and test sets
+target_name = 'SalePrice'
+split_ratios = {'train' : 0.60,
+                'validation' : 0.20,
+                'test' : 0.20}
+DF = data.ModelData(input_df, target_name, split_ratios)
+
+
+#%%
+
+input_X_df = DF.X_train.copy()
+input_y_df = DF.y_train.copy()
+
+is_train_models=True
+verbose=True
+save_file=False
+
+
+run_name = 'base_config_mean'
+pipeline_parameters = data.load_file(
+    os.path.join('data', 'pipeline_parameters', run_name + '.json'))
+
+#%%
+
+pipeline_graph = ["Pipeline Graph:"]
+if not is_train_models:
+    run_name = pipeline_parameters['run_config']['run_name']
+
+if not is_train_models:
+    input_X_df = data.align_feature_cols(
+        input_X_df, 
+        pipeline_parameters['run_config']['input_X_df_original_features'])
+    
+input_X_df_original_features = input_X_df.columns
+    
+pipeline_graph.append('Remove unused features')
+input_X_df = data.drop_columns(input_X_df, pipeline_parameters['removed_features'])
+
+pipeline_graph.append('Remove duplicates')
+if is_train_models:
+    # Check whether there are duplicates and remove
+    duplicate_rows = data.get_duplicate_rows(input_X_df)
+
+    n_duplicated_rows = len(set(duplicate_rows.index).intersection(set(input_X_df.index)))
+
+    if n_duplicated_rows > 0:
+        input_X_df.drop(duplicate_rows.index, axis=0, inplace=True)
+        input_X_df.reset_index(drop=True, inplace=True)
+        print("Removed {} duplicated rows.".format(n_duplicated_rows))
+
+pipeline_graph.append('Fill null values')
+if is_train_models:
+    data.fit_null_value_imputing(input_X_df, pipeline_parameters['imputing_strategies'])
+input_X_df = data.transform_null_value_imputing(
+    input_X_df, 
+    pipeline_parameters['imputing_strategies'],
+    verbose=verbose)
+
+pipeline_graph.append('Encode categorical features')
+if is_train_models:
+    pipeline_parameters['categorical_encodings'] = data.fit_cat_encoding(
+        input_X_df, input_y_df, pipeline_parameters['categorical_encodings'])
+input_X_df = data.transform_cat_encoding(
+    input_X_df, pipeline_parameters['categorical_encodings'])
+
+if is_train_models:
+    pipeline_graph.append('Remove outliers')
+    outliers = eda.get_isolation_forest_outliers(input_X_df)
+    print('{} records ({:.2%}) identified as an outlier'.format(
+        len(outliers['outlier_rows']),
+        outliers['outlier_proportion']))
+    
+    input_X_df.drop(outliers['outlier_rows'].index,inplace=True)
+    input_y_df.drop(outliers['outlier_rows'].index,inplace=True)
+    input_X_df.reset_index(inplace=True, drop=True)
+    input_y_df.reset_index(inplace=True, drop=True)
+    
+    input_X_df.drop(input_X_df.columns[input_X_df.isna().all()], axis=1, inplace=True)
+    input_X_df.drop(input_X_df.columns[(input_X_df == 0).all()], axis=1, inplace=True)
+
+pipeline_graph.append('Standard Scale Features')
+if is_train_models:
+    sc = data.StandardScaler()
+    sc.fit_df(input_X_df)
+    pipeline_parameters['feature_scaling_model'] = {'approach' : 'standard', 'model' : sc}
+input_X_df = pipeline_parameters['feature_scaling_model']['model'].transform_df(input_X_df)
+
+input_X_train = input_X_df.copy()
+input_y_train = input_y_df.copy()
+
+#%%
+
+gs_hyperparameters = pipeline_parameters['models']['KNN']['gridsearch_hyperparameters']
+
+gs_hyperparameters = {'alpha': [ 1.0]}
+
+#%% Regression Models
+
+from sklearn.linear_model import LinearRegression, Lasso, Ridge
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.neighbors import KNeighborsRegressor
+
+class RegressionModels():
+    def __init__(self, model_name, hyperparameters={}):
+        self.valid_models = ['LGBM', 'Linear', 'Ridge', 'Random Forest', 'KNN']
+        assert model_name in self.valid_models, "Please select one of the following models: {}".format(self.valid_models)
+        
+        self.model_name = model_name
+        self.hyperparameters = hyperparameters
+        self.model = []
+        self.feature_importance = pd.DataFrame([])
+    
+    def gridsearch_hyperparameters(self, input_X_train, input_y_train, gs_hyperparameters):
+        
+        if self.model_name == 'Linear':
+            # Linear has no hyperparameters to tune
+            pass
+        
+        else:
+            if self.model_name == 'LGBM':
+                model = lgb.LGBMRegressor(random_state=34)
+                reg = GridSearchCV(model, gs_hyperparameters).fit(
+                    input_X_train, input_y_train)
+            
+            elif self.model_name == 'Ridge':
+                model = Ridge(random_state=34, max_iter=1000)
+                reg = GridSearchCV(model, gs_hyperparameters).fit(
+                        input_X_train, input_y_train)
+            
+            elif self.model_name == 'Random Forest':
+                model = RandomForestRegressor(random_state=34)
+                reg = GridSearchCV(model, gs_hyperparameters).fit(
+                        input_X_train, input_y_train)
+            
+            elif self.model_name == 'KNN':
+                model = KNeighborsRegressor()
+                reg = GridSearchCV(model, gs_hyperparameters).fit(
+                        input_X_train, input_y_train)
+            
+            print ("Best Parameters:", reg.best_params_)
+            for param in gs_hyperparameters:
+                self.hyperparameters[param] = reg.best_params_[param]
+            
+    def fit(self, input_X_train, input_y_train):
+        if self.model_name == 'mean':
+            model = input_y_train.mean()
+        
+        elif self.model_name == 'LGBM':
+            model = lgb.LGBMRegressor(
+                num_leaves=self.hyperparameters['num_leaves'], 
+                n_estimators=200,
+                random_state=34)
+            model.fit(input_X_train, input_y_train)
+            
+            self.feature_importance = self.format_feature_importance_df(
+                input_X_train, model.feature_importances_)
+        
+        elif self.model_name == 'Linear':
+            model = LinearRegression()
+            model.fit(input_X_train, input_y_train)
+            
+            self.feature_importance = self.format_feature_importance_df(
+                input_X_train, 
+                np.abs(model.coef_) if (len(model.coef_.shape) == 1) else np.max(np.abs(model.coef_), axis=0).flatten())
+            
+        elif self.model_name == 'Ridge':
+            model = Ridge(
+                alpha=self.hyperparameters['alpha'],
+                random_state=34,
+                max_iter=1000)
+            model.fit(input_X_train, input_y_train)
+            
+            self.feature_importance = self.format_feature_importance_df(
+                input_X_train, 
+                np.abs(model.coef_) if (len(model.coef_.shape) == 1) else np.max(np.abs(model.coef_), axis=0).flatten())
+        
+        elif self.model_name == 'Random Forest':
+            model = RandomForestRegressor(
+                n_estimators=200, 
+                max_depth=self.hyperparameters['max_depth'],
+                max_features='sqrt',
+                n_jobs=4, 
+                random_state=34)
+            model.fit(input_X_train, input_y_train)
+            
+            self.feature_importance = self.format_feature_importance_df(
+                input_X_train, model.feature_importances_)
+            
+        elif self.model_name == 'KNN':
+            model = KNeighborsRegressor(
+                n_neighbors=self.hyperparameters['n_neighbors'])
+            model.fit(input_X_train, input_y_train)
+            
+        self.model = model
+            
+    def predict(self, input_X_test):
+        if self.model_name == 'mean':
+            return np.full(shape=(len(input_X_test)), fill_value=self.model)
+        
+        else:
+            pred_values = self.model.predict(input_X_test)
+            return pred_values
+        
+    def format_feature_importance_df(self, input_X_train, feature_importance):
+        model_feature_importance = pd.DataFrame(feature_importance, 
+                                  columns=["importance"],
+                                  index = input_X_train.columns)
+        model_feature_importance.sort_values(by='importance', ascending=False, inplace=True)
+        return model_feature_importance
+    
+    def plot_feature_importance(self, max_features=10):
+        if len(self.feature_importance) == 0:
+            print("Need to fit model first")
+        else:
+            plt.bar(
+                self.feature_importance.index[:max_features],
+                self.feature_importance['importance'][:max_features])
+            plt.title('Feature Importance')
+            plt.xlabel('Features')
+            plt.xticks(rotation=45, ha='right')
+            plt.show()

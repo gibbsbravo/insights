@@ -177,18 +177,18 @@ is_multiclass = True
 
 DF = data.ModelData(input_df, target_name, split_ratios)
 
-if is_multiclass:
-    # Multiclass classification
-    bin = data.BinEncoder()
-    bin.fit(DF.y_train, 5)
+# if is_multiclass:
+#     # Multiclass classification
+#     bin = data.BinEncoder()
+#     bin.fit(DF.y_train, 5)
     
-    DF.y_train.update(bin.transform(DF.y_train))
-    DF.y_val.update(bin.transform(DF.y_val))
+#     DF.y_train.update(bin.transform(DF.y_train))
+#     DF.y_val.update(bin.transform(DF.y_val))
 
-else:
-    # Binary classification
-    DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
-    DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
+# else:
+#     # Binary classification
+#     DF.y_train.update(np.where(DF.y_train>200000, 1, 0))
+#     DF.y_val.update(np.where(DF.y_val>200000, 1, 0))
 
 data.create_parameters_template(
     DF.X_train, 
