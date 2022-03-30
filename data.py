@@ -423,16 +423,26 @@ class MeanEncoder():
         return output_df
 
 class BinEncoder():
-    def __init__(self):
+    def __init__(self, equal_sized_bins=True):
         self.model_parameters = {}
+        self.equal_sized_bins = equal_sized_bins
         
     def fit(self, input_series, n_bins=5):
-        self.model_parameters[input_series.name] = (input_series.size/float(n_bins)) * np.arange(1, n_bins+1)
+        if self.equal_sized_bins:
+            # The bins have the same number of elements in each 
+            _, self.model_parameters[input_series.name] = pd.qcut(input_series, q=5, retbins=True)
+        
+        else:
+            #The bins cover an equal amount of distribution in each 
+            _, self.model_parameters[input_series.name] = pd.cut(input_series, bins=5, retbins=True)
+            
         return self.model_parameters[input_series.name]
     
     def transform(self, input_series):
-        idx = self.model_parameters[input_series.name].searchsorted(np.arange(input_series.size))
-        return idx[input_series.argsort().argsort()]
+        bins = self.model_parameters[input_series.name]
+        idx = pd.cut(input_series, bins=bins, labels=np.arange(len(bins) -1))
+        
+        return idx
     
     def fit_df(self, input_df, n_bins=5):
         for col in input_df:

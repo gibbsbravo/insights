@@ -173,7 +173,7 @@ target_name = 'SalePrice'
 split_ratios = {'train' : 0.60,
                 'validation' : 0.20,
                 'test' : 0.20}
-is_multiclass = False
+is_multiclass = True
 
 DF = data.ModelData(input_df, target_name, split_ratios)
 
@@ -209,7 +209,7 @@ if is_train_models:
 else:
     input_X_df = DF.X_val.copy()
     input_y_df = DF.y_val.copy()
-    saved_parameters_file_name = '2022.03.29.05_24_PM_base_config_mean_train.pickle'
+    saved_parameters_file_name = '2022.03.30.10_15_AM_base_config_mean_train.pickle'
     pipeline_parameters = data.load_file(os.path.join('outputs', saved_parameters_file_name))
 
 
@@ -224,8 +224,7 @@ pipeline_parameters = model_pipeline(input_X_df,
 #%%
 
 
-file_names = ['outputs/2022.03.29.05_24_PM_base_config_mean_pred.pickle', 
-              'outputs/2022.03.29.05_22_PM_base_config_one_hot_pred.pickle']
+file_names = ['outputs/2022.03.30.10_16_AM_base_config_mean_pred.pickle']
 
 results = []
 
@@ -237,7 +236,7 @@ for file_name in file_names:
         model_performance['model_name'] = model_name
         model_performance['file_name'] = file_name
         model_performance['config_name'] = pipeline_parameters['run_config']['run_name']
-        model_performance['X_input_shape'] = pipeline_parameters['run_config']['input_X_df_shape']
+        model_performance['X_input_shape'] = pipeline_parameters['run_config']['input_X_df_transformed_shape']
         model_performance['is_train_models'] = pipeline_parameters['run_config']['is_train_models']
         
         model_performance['f{}-score'.format(model_performance['f-score']['beta'])] = model_performance['f-score']['score']

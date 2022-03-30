@@ -120,7 +120,7 @@ class ClassificationModels():
         
         else:
             class_pred_probabilies = self.model.predict_proba(input_X_test)
-            return np.argmax(class_pred_probabilies, axis=1), np.around(class_pred_probabilies, 2)
+            return np.argmax(class_pred_probabilies, axis=1), class_pred_probabilies
         
     def format_feature_importance_df(self, input_X_train, feature_importance):
         model_feature_importance = pd.DataFrame(feature_importance, 
