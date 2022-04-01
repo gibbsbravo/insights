@@ -88,7 +88,8 @@ def save_file(output_object, output_file_path, overwrite=False):
 def sample_data(input_df, fraction=0.40):
     return pd.sample(frac=fraction, replace=False, random_state=34)
 
-def create_parameters_template(input_X_train, output_file_path='data/pipeline_parameters.json', overwrite=False):
+def create_parameters_template(input_X_train, regression_objective=True, 
+                               output_file_path='data/pipeline_parameters.json', overwrite=False):
     pipeline_parameters = {
         'removed_features' : [],
         'imputing_strategies' : {col : {'strategy' : 'mode', 'constant_value' : None, 'model' : None} 
@@ -107,9 +108,31 @@ def create_parameters_template(input_X_train, output_file_path='data/pipeline_pa
              'model_name' : 'Kmeans',
              'features' : [],
              'n_clusters' : 5,
-             'model' : None}],
+             'model' : None}]
+        }
+    
+    if regression_objective:
+        pipeline_parameters['models'] = {
+            'LGBM' : {'default_hyperparameters' : {'num_leaves' : 10},
+                      'gridsearch_hyperparameters' : {'num_leaves':[5, 15, 30, 60, 90]}},
+            
+            'Linear' : {'default_hyperparameters' : None,
+                      'gridsearch_hyperparameters' : None},
+            
+            'Ridge' : {'default_hyperparameters' : {'alpha' : 1},
+                      'gridsearch_hyperparameters' : {'alpha':[0.01, 0.1, 1, 10, 100]}},
+            
+            
+            'Random Forest' : {'default_hyperparameters' : {'max_depth' : 10},
+                      'gridsearch_hyperparameters' : {'max_depth':[1, 2, 8, 10, 20]}},
         
-        'models' : {
+            
+            'KNN' : {'default_hyperparameters' : {'n_neighbors' : 5},
+                      'gridsearch_hyperparameters' : None},
+            }
+        
+    else:
+        pipeline_parameters['models'] = {
             'LGBM' : {'default_hyperparameters' : {'num_leaves' : 10},
                       'gridsearch_hyperparameters' : {'num_leaves':[5, 15, 30, 60, 90]}},
             
@@ -126,8 +149,7 @@ def create_parameters_template(input_X_train, output_file_path='data/pipeline_pa
             'KNN' : {'default_hyperparameters' : {'n_neighbors' : 5},
                       'gridsearch_hyperparameters' : None},
             }
-        }
-    
+        
     save_file(pipeline_parameters, output_file_path, overwrite)
     
     return pipeline_parameters

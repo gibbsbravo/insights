@@ -266,10 +266,13 @@ DF = data.ModelData(input_df, target_name, split_ratios)
 
 #%%
 
-input_X_df = DF.X_train.copy()
-input_y_df = DF.y_train.copy()
+# input_X_df = DF.X_train.copy()
+# input_y_df = DF.y_train.copy()
 
-is_train_models=True
+input_X_df = DF.X_val.copy()
+input_y_df = DF.y_val.copy()
+
+is_train_models=False
 verbose=True
 save_file=False
 
