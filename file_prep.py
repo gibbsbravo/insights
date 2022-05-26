@@ -356,17 +356,18 @@ def calculate_differences(input_X_train, input_y_train, feature_list, max_compar
 
 #%%
 
-# articles_df = pd.read_csv('D:/HM_Data/articles.csv')
-
-df = load_file('D:/HM_Data/articles.csv')
-
 # Load 10% of transactions to make it easy to work with
-p = 0.02  
+p = 0.001  
 transactions_df = pd.read_csv(
           'D:/HM_Data/transactions_train.csv',
           header=0, 
           skiprows=lambda i: i>0 and random.random() > p
 )
+
+#%%
+
+# articles_df = pd.read_csv('D:/HM_Data/articles.csv')
+df = load_file('D:/HM_Data/articles.csv')
 
 #%%
 
@@ -423,28 +424,380 @@ transactions_df['is_outlier'] = is_IQR_outlier(transactions_df['price'])
 
 #%% Export processed data
 
-save_file(df, 'outputs/articles_df.csv')
+# save_file(df, 'outputs/articles_df.csv')
 
 transactions_df = transactions_df.loc[transactions_df['article_id'].isin(df['article_id'])]
 
-save_file(transactions_df, 'outputs/transactions_df.csv', overwrite=True)
+# save_file(transactions_df, 'outputs/transactions_df.csv', overwrite=True)
 
 
 #%% Confirmatory Analysis
 
+df = raw_df.copy()
+# raw_df = df.copy()
 df = pd.merge(transactions_df, df, how='left', on='article_id')
 
 #%%
 
-df.groupby('product_type_name').article_id.count().sort_values(ascending=False)
+# df.groupby('product_type_name').article_id.count().sort_values(ascending=False)
 
-x = df.loc[pd.isnull(df['product_type_name'])]
+# x = df.loc[pd.isnull(df['product_type_name'])]
+
+#%%
+
+df['t_dat'] = pd.to_datetime(df['t_dat'])
+
+df['year'] = pd.to_datetime(df['t_dat']).dt.year
+df['last_year'] = df['year'] - 1
+
+#%%
+
+annual_revenue = df[['year', 'price']].groupby('year').sum()
+
+calendar_scaffold = pd.DataFrame({'calendar_year':[2017, 2018, 2019, 2020]})
+
+first_tran_date = df[['customer_id', 't_dat']].groupby('customer_id').min()
+first_tran_date['t_dat'] = first_tran_date['t_dat'].dt.year
+first_tran_date.rename(columns={'t_dat':'add_year'}, inplace=True)
+df = pd.merge(df, first_tran_date, on='customer_id', how='left')
+
+last_tran_date = df[['customer_id', 't_dat']].groupby('customer_id').max()
+last_tran_date.rename(columns={'t_dat':'last_date'}, inplace=True)
+df = pd.merge(df, last_tran_date, on='customer_id', how='left')
+
+tenure = df['last_date'] - df['first_date']
+
+df.loc[df['add_year'] == df['t_dat'].dt.year][['add_year', 'price']].groupby('add_year').sum()
+
+#%%
+
+x = df[['customer_id', 'year', 'article_id']].groupby(['customer_id', 'year']).count()
+x.reset_index(inplace=True)
+x
+
+repeat_customers = x['customer_id'].value_counts().index[x['customer_id'].value_counts() > 1]
+
+df[['year','price']].loc[df['customer_id'].isin(repeat_customers)].groupby('year').sum()
+
+customers_with_2018_t = df.loc[df['']]
+
+#%%
+
+df['add_year'] = df['first_date'].dt.year
+df['drop_year'] = df['last_date'].dt.year + 1 
+
+customer_adds = df[['add_year', 'price']].groupby('add_year').sum()
+
+
+customers_by_year = df[['year', 'customer_id','article_id']].groupby(['year', 'customer_id']).count()
+customers_by_year.rename({'article_id' : 'n_purchases'}, axis=1, inplace=True)
+customers_by_year.reset_index(inplace=True)
+
+y = customers_by_year.pivot(index='customer_id', columns='year')
+
+y.reset_index(inplace=True)
+
+repeat_customers = y[(y.loc[:, ('n_purchases', 2018)] > 0) & (y.loc[:, ('n_purchases', 2019)] > 0)].index
+
+
+
+
+
+pd.merge(calendar_scaffold, customers_by_year,  how='left',
+         left_on=['last_year', 'customer_id'],
+         right_on=['year', 'customer_id'])
+
+
+#%%
+
+py_customer = pd.merge(df, customers_by_year,  how='left',
+         left_on=['last_year', 'customer_id'],
+         right_on=['year', 'customer_id'])
+
+py_customer['customer_in_py'] = np.where(py_customer['n_purchases']>0, True, False)
+
+
+top_customer = 'ffa034ef641a6daff781539adb7830bcde0745ddb2bced1afee78dfe87419c53'
+
+x = py_customer.loc[py_customer['customer_id'] == top_customer]
+
+
+
+#%%
+pd.set_option('max_columns', 10)
+
+df = pd.read_csv(
+    'C:/Users/andre/OneDrive/Documents/Projects/insights/outputs/transaction_items.csv')
+
+df.rename({
+    'InvoiceNo' : 'order_id',
+    'StockCode': 'sku',
+	'Description': 'description',
+	'Quantity' : 'quantity',
+	'InvoiceDate' : 'order_date',
+ 	'UnitPrice' : 'unit_price',
+     'CustomerID' : 'customer_id',
+     'Country': 'country'}, axis=1, inplace=True)
+
+df['order_date'] = pd.to_datetime(df['order_date'])
+
+def get_cohorts(df, period='M'):
+    """Given a Pandas DataFrame of transactional items, this function returns
+    a Pandas DataFrame containing the acquisition cohort and order cohort which
+    can be used for customer analysis or the creation of a cohort analysis matrix.
+    
+    Parameters
+    ----------
+
+    df: Pandas DataFrame
+        Required columns: order_id, customer_id, order_date
+    period: Period value - M, Q, or Y
+        Create cohorts using month, quarter, or year of acquisition
+    
+    Returns
+    -------
+    products: Pandas DataFrame
+        customer_id, order_id, order_date, acquisition_cohort, order_cohort
+    """
+    
+    df = df[['customer_id','order_id','order_date']].drop_duplicates()
+    df = df.assign(acquisition_cohort = df.groupby('customer_id')\
+                   ['order_date'].transform('min').dt.to_period(period))
+    df = df.assign(order_cohort = df['order_date'].dt.to_period(period))
+    return df
+
+import operator as op
+
+def get_retention(df, period='M'):
+    """Calculate the retention of customers in each month after their acquisition 
+    and return the count of customers in each month. 
+    
+    Parameters
+    ----------
+
+    df: Pandas DataFrame
+        Required columns: order_id, customer_id, order_date
+    period: Period value - M, Q, or Y
+        Create cohorts using month, quarter, or year of acquisition
+    
+    Returns
+    -------
+    products: Pandas DataFrame
+        acquisition_cohort, order_cohort, customers, periods
+    """
+
+    df = get_cohorts(df, period).groupby(['acquisition_cohort', 'order_cohort'])\
+                                .agg(customers=('customer_id', 'nunique')) \
+                                .reset_index(drop=False)
+    df['periods'] = (df.order_cohort - df.acquisition_cohort).apply(op.attrgetter('n'))
+
+    return df
+
+
+df = get_cohorts(df, period='Q')
+df.head()
+
+retention = get_retention(df)
+retention.head()
+
+def get_cohort_matrix(df, period='M', percentage=False):
+    """Return a cohort matrix showing for each acquisition cohort, the number of 
+    customers who purchased in each period after their acqusition. 
+    
+    Parameters
+    ----------
+
+    df: Pandas DataFrame
+        Required columns: order_id, customer_id, order_date
+    period: Period value - M, Q, or Y
+        Create cohorts using month, quarter, or year of acquisition
+    percentage: True or False
+        Return raw numbers or a percentage retention
+
+    Returns
+    -------
+    products: Pandas DataFrame
+        acquisition_cohort, period
+    """
+    
+    df = get_retention(df, period).pivot_table(index = 'acquisition_cohort',
+                                               columns = 'periods',
+                                               values = 'customers')
+    
+    if percentage:
+        df = df.divide(df.iloc[:,0], axis=0)*100
+    
+    return df
+
+
+df_matrixm = get_cohort_matrix(df, 'M', percentage=True)
+df_matrixm.head()
+
+
+
+
+df_matrixm = df_matrixm.drop(0, axis=1)
+
+f, ax = plt.subplots(figsize=(20, 5))
+cmap = sns.color_palette("Blues")
+monthly_sessions = sns.heatmap(df_matrixm, 
+                    annot=True, 
+                    linewidths=3, 
+                    ax=ax, 
+                    cmap=cmap, 
+                    square=False)
+
+ax.axes.set_title("Cohort analysis",fontsize=20)
+ax.set_xlabel("Acquisition cohort",fontsize=15)
+ax.set_ylabel("Period",fontsize=15)
+plt.show()
+
+
+#%% Preprocessing
+
+df['year'] = np.random.randint(2010, 2015, size=len(df), dtype=int)
+
+df = df.loc[(df['quantity'] >= 0) & (df['unit_price'] >= 0)]
+df.reset_index(drop=True, inplace=True)
+
+df['total_revenue'] = df['quantity'] * df['unit_price']
+
+#%% Build customer history summary
+
+customer_hist_df = df[['customer_id', 'year', 'sku', 'quantity', 'unit_price', 'total_revenue']].groupby(
+    ['customer_id', 'year', 'sku']).aggregate(['sum', 'mean'])
+
+customer_hist_df.columns = ["_".join(a) for a in customer_hist_df.columns.to_flat_index()]
+customer_hist_df.reset_index(inplace=True)
+
+first_year = customer_hist_df[['customer_id', 'year']].groupby('customer_id').min()
+first_year.rename({'year' : 'cust_first_year'}, axis=1, inplace=True)
+churn_year = customer_hist_df[['customer_id', 'year']].groupby('customer_id').max() + 1 
+churn_year.rename({'year' : 'cust_churn_year'}, axis=1, inplace=True)
+
+customer_hist_df = pd.merge(customer_hist_df, first_year, how='left', on='customer_id')
+customer_hist_df = pd.merge(customer_hist_df, churn_year, how='left', on='customer_id')
+customer_hist_df['customer_tenure'] = customer_hist_df['cust_churn_year'] - customer_hist_df['cust_first_year']
+
+prod_first_year = customer_hist_df[['customer_id', 'year', 'sku']].groupby(['customer_id', 'sku']).min()
+prod_first_year.rename({'year' : 'prod_first_year'}, axis=1, inplace=True)
+prod_churn_year = customer_hist_df[['customer_id', 'year', 'sku']].groupby(['customer_id', 'sku']).max() + 1 
+prod_churn_year.rename({'year' : 'prod_churn_year'}, axis=1, inplace=True)
+
+customer_hist_df = pd.merge(customer_hist_df, prod_first_year, how='left', on=['customer_id', 'sku'])
+customer_hist_df = pd.merge(customer_hist_df, prod_churn_year, how='left', on=['customer_id', 'sku'])
+customer_hist_df['product_tenure'] = customer_hist_df['prod_churn_year'] - customer_hist_df['prod_first_year']
+
+#%%
+
+# Sort values
+customer_hist_df.sort_values(['customer_id', 'year', 'sku'], ascending=True, inplace=True)
+
+# Merge with main dataframe
+combined_df = pd.merge(
+    df, 
+    customer_hist_df[['customer_id', 'sku', 'cust_first_year', 'cust_churn_year',
+                      'customer_tenure', 'prod_first_year', 'prod_churn_year',
+                      'product_tenure']], how='left', on=['customer_id', 'sku'])
+
+# Get final year of product revenue
+prod_final_year_rev = customer_hist_df[
+    ['customer_id', 'sku', 'total_revenue_sum']].groupby(['customer_id', 'sku']).tail(1)
+prod_final_year_rev.rename({'total_revenue_sum' : 'prod_final_year_revenue'}, axis=1, inplace=True)
+
+# Get product churn date
+prod_churn_date = df[['customer_id', 'sku', 'order_date']].groupby(
+        ['customer_id', 'sku']).aggregate(['max'])
+
+prod_churn_date.columns = ["_".join(a) for a in prod_churn_date.columns.to_flat_index()]
+prod_churn_date.reset_index(inplace=True)
+prod_churn_date.rename({'order_date_max' : 'prod_churn_date'}, axis=1, inplace=True)
+prod_churn_date['prod_churn_date'] = prod_churn_date['prod_churn_date'] + pd.DateOffset(years=1)
+
+# Get customer churn date
+cust_churn_date = prod_churn_date[['customer_id', 'prod_churn_date']].groupby(['customer_id']).max()
+cust_churn_date.reset_index(inplace=True)
+cust_churn_date.rename({'prod_churn_date' : 'cust_churn_date'}, axis=1, inplace=True)
+
+# Join together churn analysis
+churn_df = pd.merge(prod_final_year_rev, prod_churn_date, how='left', on=['customer_id', 'sku'])
+churn_df = pd.merge(churn_df, cust_churn_date, how='left', on=['customer_id'])
+
+churn_df['prod_final_year_revenue'] = -churn_df['prod_final_year_revenue']
+churn_df.drop('cust_churn_date', axis=1, inplace=True)
+churn_df.rename({'prod_churn_date' : 'order_date',
+                 'prod_final_year_revenue' : 'total_revenue'}, axis=1, inplace=True)
+
+# Concat with main
+x = pd.concat([combined_df, churn_df]).tail()
+
+#%%
+
+customer_hist_df['prod_final_year_revenue'] = 
+
+customer_hist_df = pd.merge(customer_hist_df, prod_final_year_rev, 
+                            how='left', on=['customer_id', 'sku'])
+
+
+
+combined_df['status'] = str('recurring')
+
+combined_df.loc[combined_df['year'] == combined_df['cust_first_year']] = 'customer_add'
+combined_df.loc[
+    (combined_df['year'] != combined_df['cust_first_year']) &
+    (combined_df['year'] == combined_df['prod_first_year'])] = 'product_add'
+    
+
+pd.
+
+
+
+
+
 
 #%%
 
 
+row = df.iloc[0]
+
+def categorize_transactions(transaction_record, input_customer_hist_df):
+    customer_transaction_years = input_customer_hist_df['year'].loc[
+        input_customer_hist_df['customer_id'] == transaction_record['customer_id']].values
+    
+    py_skus = input_customer_hist_df['sku'].loc[
+        (input_customer_hist_df['customer_id'] == transaction_record['customer_id']) & 
+        (input_customer_hist_df['year'] == transaction_record['year'] - 1)].values
+    
+    py_avg_unit_price = input_customer_hist_df['unit_price_mean'].loc[
+        (input_customer_hist_df['customer_id'] == transaction_record['customer_id']) & 
+        (input_customer_hist_df['year'] == transaction_record['year'] - 1) &
+        (input_customer_hist_df['sku'] == transaction_record['sku'])].values
+    
+    if row['year'] -1 not in customer_transaction_years:
+        return {'type': "Customer Add", 'value' : transaction_record['total_revenue']}
+    
+    elif row['sku'] not in py_skus:
+        return {'type': "Product Add", 'value' : transaction_record['total_revenue']}
+    
+    elif row['unit_price'] > py_avg_unit_price[0]:        
+        return {'type': "Price Add", 'value' : (transaction_record['unit_price'] - py_avg_unit_price[0]) * transaction_record['quantity']}
+    
+    elif row['unit_price'] > py_avg_unit_price[0]:        
+        return {'type': "Price Drop", 'value' : (py_avg_unit_price[0] - transaction_record['unit_price']) * transaction_record['quantity']}
+    
+    else:
+        return {'type': "Recurring Payment", 'value' : transaction_record['total_revenue']}
 
 
+
+results = []
+
+for index, row in df.iterrows():
+    results.append(categorize_transactions(
+        row, customer_hist_df))
+
+
+#%%
 
 
 
