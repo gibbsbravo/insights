@@ -526,20 +526,7 @@ x = py_customer.loc[py_customer['customer_id'] == top_customer]
 #%%
 pd.set_option('max_columns', 10)
 
-df = pd.read_csv(
-    'C:/Users/andre/OneDrive/Documents/Projects/insights/outputs/transaction_items.csv')
 
-df.rename({
-    'InvoiceNo' : 'order_id',
-    'StockCode': 'sku',
-	'Description': 'description',
-	'Quantity' : 'quantity',
-	'InvoiceDate' : 'order_date',
- 	'UnitPrice' : 'unit_price',
-     'CustomerID' : 'customer_id',
-     'Country': 'country'}, axis=1, inplace=True)
-
-df['order_date'] = pd.to_datetime(df['order_date'])
 
 def get_cohorts(df, period='M'):
     """Given a Pandas DataFrame of transactional items, this function returns
@@ -653,6 +640,24 @@ ax.set_ylabel("Period",fontsize=15)
 plt.show()
 
 
+#%%
+
+df = pd.read_csv(
+    'C:/Users/andre/OneDrive/Documents/Projects/insights/outputs/transaction_items.csv')
+
+df.rename({
+    'InvoiceNo' : 'order_id',
+    'StockCode': 'sku',
+	'Description': 'description',
+	'Quantity' : 'quantity',
+	'InvoiceDate' : 'order_date',
+ 	'UnitPrice' : 'unit_price',
+     'CustomerID' : 'customer_id',
+     'Country': 'country'}, axis=1, inplace=True)
+
+df['order_date'] = pd.to_datetime(df['order_date'])
+
+
 #%% Preprocessing
 
 df['year'] = np.random.randint(2010, 2015, size=len(df), dtype=int)
@@ -661,6 +666,9 @@ df = df.loc[(df['quantity'] >= 0) & (df['unit_price'] >= 0)]
 df.reset_index(drop=True, inplace=True)
 
 df['total_revenue'] = df['quantity'] * df['unit_price']
+
+df = df.loc[df['description'] != 'Adjust bad debt']
+df.reset_index(drop=True, inplace=True)
 
 #%% Build customer history summary
 
@@ -729,9 +737,34 @@ churn_df.rename({'prod_churn_date' : 'order_date',
                  'prod_final_year_revenue' : 'total_revenue'}, axis=1, inplace=True)
 
 # Concat with main
-x = pd.concat([combined_df, churn_df]).tail()
+combined_df = pd.concat([combined_df, churn_df])
+combined_df.reset_index(drop=True, inplace=True)
 
 #%%
+
+combined_df['status'] = str('recurring')
+
+combined_df.loc[combined_df['year'] == combined_df['cust_first_year'], 'status'] = 'customer_add'
+combined_df.loc[
+    (combined_df['year'] != combined_df['cust_first_year']) &
+    (combined_df['year'] == combined_df['prod_first_year']), 'status'] = 'product_add'
+combined_df.loc[
+    pd.isnull(combined_df['order_id']) &
+    (combined_df['total_revenue'] < 0), 'status'] = 'product_churn'
+
+#%% 
+
+save_file(combined_df, 'outputs/transaction_bridge.csv', overwrite=True)
+
+
+#%%
+
+
+
+
+
+
+
 
 customer_hist_df['prod_final_year_revenue'] = 
 
@@ -740,12 +773,6 @@ customer_hist_df = pd.merge(customer_hist_df, prod_final_year_rev,
 
 
 
-combined_df['status'] = str('recurring')
-
-combined_df.loc[combined_df['year'] == combined_df['cust_first_year']] = 'customer_add'
-combined_df.loc[
-    (combined_df['year'] != combined_df['cust_first_year']) &
-    (combined_df['year'] == combined_df['prod_first_year'])] = 'product_add'
     
 
 pd.
