@@ -11,6 +11,7 @@ import seaborn as sns
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 import random
+import operator as op
 
 # %matplotlib inline
 sns.set_style("white")
@@ -91,8 +92,6 @@ def save_file(output_object, output_file_path, overwrite=False):
 
 def sample_data(input_df, fraction=0.40):
     return pd.sample(frac=fraction, replace=False, random_state=34)
-
-
 
 
 #%% Handle Null Values
@@ -354,6 +353,89 @@ def calculate_differences(input_X_train, input_y_train, feature_list, max_compar
     
     return True
 
+#%% Cohort Analysis
+
+def get_cohorts(df, period='M'):
+    """Given a Pandas DataFrame of transactional items, this function returns
+    a Pandas DataFrame containing the acquisition cohort and order cohort which
+    can be used for customer analysis or the creation of a cohort analysis matrix.
+    
+    Parameters
+    ----------
+
+    df: Pandas DataFrame
+        Required columns: order_id, customer_id, order_date
+    period: Period value - M, Q, or Y
+        Create cohorts using month, quarter, or year of acquisition
+    
+    Returns
+    -------
+    products: Pandas DataFrame
+        customer_id, order_id, order_date, acquisition_cohort, order_cohort
+    """
+    
+    df = df[['customer_id','order_id','order_date']].drop_duplicates()
+    df = df.assign(acquisition_cohort = df.groupby('customer_id')\
+                   ['order_date'].transform('min').dt.to_period(period))
+    df = df.assign(order_cohort = df['order_date'].dt.to_period(period))
+    return df
+
+
+
+def get_retention(df, period='M'):
+    """Calculate the retention of customers in each month after their acquisition 
+    and return the count of customers in each month. 
+    
+    Parameters
+    ----------
+
+    df: Pandas DataFrame
+        Required columns: order_id, customer_id, order_date
+    period: Period value - M, Q, or Y
+        Create cohorts using month, quarter, or year of acquisition
+    
+    Returns
+    -------
+    products: Pandas DataFrame
+        acquisition_cohort, order_cohort, customers, periods
+    """
+
+    df = get_cohorts(df, period).groupby(['acquisition_cohort', 'order_cohort'])\
+                                .agg(customers=('customer_id', 'nunique')) \
+                                .reset_index(drop=False)
+    df['periods'] = (df.order_cohort - df.acquisition_cohort).apply(op.attrgetter('n'))
+
+    return df
+
+def get_cohort_matrix(df, period='M', percentage=False):
+    """Return a cohort matrix showing for each acquisition cohort, the number of 
+    customers who purchased in each period after their acqusition. 
+    
+    Parameters
+    ----------
+
+    df: Pandas DataFrame
+        Required columns: order_id, customer_id, order_date
+    period: Period value - M, Q, or Y
+        Create cohorts using month, quarter, or year of acquisition
+    percentage: True or False
+        Return raw numbers or a percentage retention
+
+    Returns
+    -------
+    products: Pandas DataFrame
+        acquisition_cohort, period
+    """
+    
+    df = get_retention(df, period).pivot_table(index = 'acquisition_cohort',
+                                               columns = 'periods',
+                                               values = 'customers')
+    
+    if percentage:
+        df = df.divide(df.iloc[:,0], axis=0)*100
+    
+    return df
+
 #%%
 
 # Load 10% of transactions to make it easy to work with
@@ -426,7 +508,7 @@ transactions_df['is_outlier'] = is_IQR_outlier(transactions_df['price'])
 
 # save_file(df, 'outputs/articles_df.csv')
 
-transactions_df = transactions_df.loc[transactions_df['article_id'].isin(df['article_id'])]
+# transactions_df = transactions_df.loc[transactions_df['article_id'].isin(df['article_id'])]
 
 # save_file(transactions_df, 'outputs/transactions_df.csv', overwrite=True)
 
@@ -523,124 +605,10 @@ x = py_customer.loc[py_customer['customer_id'] == top_customer]
 
 
 
-#%%
-pd.set_option('max_columns', 10)
 
 
 
-def get_cohorts(df, period='M'):
-    """Given a Pandas DataFrame of transactional items, this function returns
-    a Pandas DataFrame containing the acquisition cohort and order cohort which
-    can be used for customer analysis or the creation of a cohort analysis matrix.
-    
-    Parameters
-    ----------
-
-    df: Pandas DataFrame
-        Required columns: order_id, customer_id, order_date
-    period: Period value - M, Q, or Y
-        Create cohorts using month, quarter, or year of acquisition
-    
-    Returns
-    -------
-    products: Pandas DataFrame
-        customer_id, order_id, order_date, acquisition_cohort, order_cohort
-    """
-    
-    df = df[['customer_id','order_id','order_date']].drop_duplicates()
-    df = df.assign(acquisition_cohort = df.groupby('customer_id')\
-                   ['order_date'].transform('min').dt.to_period(period))
-    df = df.assign(order_cohort = df['order_date'].dt.to_period(period))
-    return df
-
-import operator as op
-
-def get_retention(df, period='M'):
-    """Calculate the retention of customers in each month after their acquisition 
-    and return the count of customers in each month. 
-    
-    Parameters
-    ----------
-
-    df: Pandas DataFrame
-        Required columns: order_id, customer_id, order_date
-    period: Period value - M, Q, or Y
-        Create cohorts using month, quarter, or year of acquisition
-    
-    Returns
-    -------
-    products: Pandas DataFrame
-        acquisition_cohort, order_cohort, customers, periods
-    """
-
-    df = get_cohorts(df, period).groupby(['acquisition_cohort', 'order_cohort'])\
-                                .agg(customers=('customer_id', 'nunique')) \
-                                .reset_index(drop=False)
-    df['periods'] = (df.order_cohort - df.acquisition_cohort).apply(op.attrgetter('n'))
-
-    return df
-
-
-df = get_cohorts(df, period='Q')
-df.head()
-
-retention = get_retention(df)
-retention.head()
-
-def get_cohort_matrix(df, period='M', percentage=False):
-    """Return a cohort matrix showing for each acquisition cohort, the number of 
-    customers who purchased in each period after their acqusition. 
-    
-    Parameters
-    ----------
-
-    df: Pandas DataFrame
-        Required columns: order_id, customer_id, order_date
-    period: Period value - M, Q, or Y
-        Create cohorts using month, quarter, or year of acquisition
-    percentage: True or False
-        Return raw numbers or a percentage retention
-
-    Returns
-    -------
-    products: Pandas DataFrame
-        acquisition_cohort, period
-    """
-    
-    df = get_retention(df, period).pivot_table(index = 'acquisition_cohort',
-                                               columns = 'periods',
-                                               values = 'customers')
-    
-    if percentage:
-        df = df.divide(df.iloc[:,0], axis=0)*100
-    
-    return df
-
-
-df_matrixm = get_cohort_matrix(df, 'M', percentage=True)
-df_matrixm.head()
-
-
-
-
-df_matrixm = df_matrixm.drop(0, axis=1)
-
-f, ax = plt.subplots(figsize=(20, 5))
-cmap = sns.color_palette("Blues")
-monthly_sessions = sns.heatmap(df_matrixm, 
-                    annot=True, 
-                    linewidths=3, 
-                    ax=ax, 
-                    cmap=cmap, 
-                    square=False)
-
-ax.axes.set_title("Cohort analysis",fontsize=20)
-ax.set_xlabel("Acquisition cohort",fontsize=15)
-ax.set_ylabel("Period",fontsize=15)
-plt.show()
-
-
-#%%
+#%% Load Data
 
 df = pd.read_csv(
     'C:/Users/andre/OneDrive/Documents/Projects/insights/outputs/transaction_items.csv')
@@ -760,22 +728,41 @@ save_file(combined_df, 'outputs/transaction_bridge.csv', overwrite=True)
 #%%
 
 
+combined_df.loc[combined_df['customer_id'] == 12346.0].T
+
+z = combined_df.loc[(combined_df['order_date'].dt.year == 2012) &
+                    (combined_df['order_date'].dt.month == 1) &
+                    (combined_df['status'] == 'product_churn')]
+
+zz = z[['customer_id', 'total_revenue']].groupby('customer_id').sum()
+
+zz = z[['sku', 'total_revenue']].groupby('sku').sum()
+zz.reset_index(inplace=True)
 
 
+z = combined_df.loc[(combined_df['status'] == 'product_churn')]
 
+z[['sku', 'total_revenue']].groupby(['sku']).sum().sort_values(by='total_revenue')
 
+#%% Plot Cohort Analysis
 
+# Requires the following cols: order_id, customer_id, order_date
+df_matrixm = get_cohort_matrix(df, 'A', percentage=False)
+# df_matrixm = df_matrixm.drop(0, axis=1)
 
-customer_hist_df['prod_final_year_revenue'] = 
+f, ax = plt.subplots(figsize=(20, 5))
+cmap = sns.color_palette("Blues")
+monthly_sessions = sns.heatmap(df_matrixm, 
+                    annot=True, 
+                    linewidths=3, 
+                    ax=ax, 
+                    cmap=cmap, 
+                    square=False)
 
-customer_hist_df = pd.merge(customer_hist_df, prod_final_year_rev, 
-                            how='left', on=['customer_id', 'sku'])
-
-
-
-    
-
-pd.
+ax.axes.set_title("Cohort analysis",fontsize=20)
+ax.set_xlabel("Acquisition cohort",fontsize=15)
+ax.set_ylabel("Period",fontsize=15)
+plt.show()
 
 
 
