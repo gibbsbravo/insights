@@ -529,7 +529,7 @@ df['customer_id'] = df['customer_id'].astype(str)
 #%% Preprocessing
 
 # Remove negative quantities and negative unit prices
-df = df.loc[(df['quantity'] >= 0) & (df['unit_price'] >= 0), :]
+df = df.loc[(df['quantity'] > 0) & (df['unit_price'] > 0), :]
 df.reset_index(drop=True, inplace=True)
 
 # Calculate total revenue
@@ -631,9 +631,9 @@ save_file(final_df, 'outputs/transaction_bridge.csv', overwrite=True)
 #%% Plot Cohort Analysis
 
 # Requires the following cols: order_id, customer_id, order_date
-df_matrixm = get_cohort_matrix(combined_df.loc[combined_df['type'] != 'product_churn'],
-                               'A', percentage=False)
-# df_matrixm = df_matrixm.drop(0, axis=1)
+df_matrixm = get_cohort_matrix(df[['order_id', 'customer_id', 'order_date']],
+                               'M', percentage=True)
+df_matrixm = df_matrixm.drop(0, axis=1)
 
 f, ax = plt.subplots(figsize=(20, 5))
 cmap = sns.color_palette("Blues")
@@ -649,22 +649,37 @@ ax.set_xlabel("Acquisition cohort",fontsize=15)
 ax.set_ylabel("Period",fontsize=15)
 plt.show()
 
-
-
 #%% --------------- ARCHIVE ---------------
 
 
 x = df.loc[df['customer_id'] == '13296.0']
-y = final_df.loc[final_df['customer_id'] == '13296.0']
+y = final_df.loc[final_df['customer_id'] == '16446.0']
+
+
+df.loc[(df['order_date'].dt.year == 2011) &
+                    (df['order_date'].dt.month == 12)]['total_revenue'].sum()
+
+final_df.loc[(final_df['order_date'].dt.year == 2011) &
+                    (final_df['order_date'].dt.month == 12)]['total_revenue'].sum()
+
+
+z = final_df.loc[(final_df['order_date'].dt.year == 2011) &
+                    (final_df['order_date'].dt.month == 12) &
+                    (final_df['type'] == 'customer_add')]
+
+z = final_df.loc[(final_df['order_date'].dt.year == 2012) &
+                    (final_df['order_date'].dt.month == 12) &
+                    (final_df['type'] == 'product_churn')]
 
 #%%
 
 
+
+
+
 combined_df.loc[combined_df['customer_id'] == 12346.0].T
 
-z = combined_df.loc[(combined_df['order_date'].dt.year == 2012) &
-                    (combined_df['order_date'].dt.month == 1) &
-                    (combined_df['status'] == 'product_churn')]
+
 
 zz = z[['customer_id', 'total_revenue']].groupby('customer_id').sum()
 
